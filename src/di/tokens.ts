@@ -1,0 +1,27 @@
+export const TOKENS = {
+  config: Symbol('config'),
+  logger: Symbol('logger'),
+  eventBus: Symbol('eventBus'),
+  performanceTimer: Symbol('performanceTimer'),
+  memoryCache: Symbol('memoryCache'),
+  diskCache: Symbol('diskCache'),
+  socketClient: Symbol('socketClient'),
+  uiStore: Symbol('uiStore'),
+  pluginRegistry: Symbol('pluginRegistry'),
+  orchestrator: Symbol('orchestrator'),
+
+  // Real domain services
+  backendClient: Symbol('backendClient'),
+  aiProvider: Symbol('aiProvider'),
+  documentService: Symbol('documentService'),
+  documentStore: Symbol('documentStore'),
+  chatService: Symbol('chatService'),
+  chatStore: Symbol('chatStore'),
+  graphService: Symbol('graphService'),
+  notesService: Symbol('notesService'),
+  sessionEngine: Symbol('sessionEngine'),
+  analyticsService: Symbol('analyticsService'),
+  browserBridge: Symbol('browserBridge'),
+  researchService: Symbol('researchService'),
+  failureInjector: Symbol('failureInjector'),
+} as const;
