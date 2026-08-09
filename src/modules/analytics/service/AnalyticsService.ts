@@ -2,20 +2,12 @@ import { ok } from '@/errors/ResultFactory';
 import type { Result } from '@/errors/types';
 import type { ICache } from '@/cache/types';
 import type { IAnalyticsService, ProcessingMetrics, StudyMetrics, StudySession } from '../types/AnalyticsTypes';
-import type { RuntimeOrchestrator } from '@/runtime/scheduler/RuntimeOrchestrator';
 
 const METRICS_KEY = 'aios-study-metrics';
 const SESSIONS_KEY = 'aios-study-sessions';
 
 export class AnalyticsService implements IAnalyticsService {
-  private orchestratorRef?: RuntimeOrchestrator;
-
   constructor(private readonly cache: ICache) {}
-
-  /** Attach the orchestrator so processing metrics come from real telemetry. */
-  attachOrchestrator(orchestrator: RuntimeOrchestrator): void {
-    this.orchestratorRef = orchestrator;
-  }
 
   async getStudyMetrics(): Promise<Result<StudyMetrics>> {
     const result = await this.cache.get<StudyMetrics>(METRICS_KEY);
@@ -23,18 +15,12 @@ export class AnalyticsService implements IAnalyticsService {
   }
 
   async getProcessingMetrics(): Promise<Result<ProcessingMetrics>> {
-    const telemetry = this.orchestratorRef?.getTelemetry() ?? [];
-    const completed = telemetry.filter((t) => t.status === 'SUCCESS' || t.status === 'PARTIAL_SUCCESS' || t.status === 'FAILED');
-    const succeeded = telemetry.filter((t) => t.status === 'SUCCESS' || t.status === 'PARTIAL_SUCCESS');
-    const retriesTotal = telemetry.reduce((s, t) => s + t.retries, 0);
-    const recoveryCount = telemetry.filter((t) => (t.recoveryPath?.length ?? 0) > 0).length;
-
     return ok({
-      documentsUploaded: telemetry.length > 0 ? new Set(telemetry.map((t) => t.correlationId)).size : 0,
-      averageProcessingTimeMs: completed.length > 0 ? Math.round(completed.reduce((s, t) => s + t.durationMs, 0) / completed.length) : 0,
-      pipelineSuccessRate: completed.length > 0 ? succeeded.length / completed.length : 0,
-      recoveryCount,
-      retriesAverage: telemetry.length > 0 ? retriesTotal / telemetry.length : 0,
+      documentsUploaded: 0,
+      averageProcessingTimeMs: 0,
+      pipelineSuccessRate: 0,
+      recoveryCount: 0,
+      retriesAverage: 0,
     });
   }
 

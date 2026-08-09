@@ -1,4 +1,4 @@
-import { supabase, isSupabaseConfigured } from '@/config/SupabaseConfig';
+import { supabase } from '@/config/SupabaseConfig';
 
 export interface FetchPageOptions {
   url: string;
@@ -24,11 +24,6 @@ let signedInAnonymously = false;
 
 async function ensureAnonymousSession(): Promise<void> {
   if (signedInAnonymously) return;
-  if (!isSupabaseConfigured() || !supabase) {
-    throw new BrightDataError(
-      'Supabase is not configured (VITE_SUPABASE_ANON_KEY missing). Web fetching requires the bright-data-proxy Edge Function.',
-    );
-  }
   const {
     data: { session },
   } = await supabase.auth.getSession();
@@ -65,10 +60,6 @@ export async function fetchPageContent(url: string): Promise<FetchPageResult> {
   }
 
   await ensureAnonymousSession();
-
-  if (!supabase) {
-    throw new BrightDataError('Supabase is not configured');
-  }
 
   const { data, error } = await supabase.functions.invoke<{
     content?: string;

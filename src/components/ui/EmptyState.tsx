@@ -1,11 +1,10 @@
-import type { ReactNode } from 'react';
 import { cn } from '@/utils/cn';
 import { FileQuestion } from 'lucide-react';
 
 interface EmptyStateProps {
   title?: string;
   message?: string;
-  action?: ReactNode;
+  action?: React.ReactNode;
   className?: string;
 }
 

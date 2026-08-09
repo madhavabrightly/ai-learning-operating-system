@@ -21,12 +21,11 @@ const CODE_TO_CATEGORY: Record<string, ErrorCategory> = {
   FETCH_FAILED: 'NETWORK',
   WS_ERROR: 'NETWORK',
   DI_MISSING: 'PLUGIN',
+  APP_ERROR: 'UNKNOWN',
 };
 
 export function classifyError(error: AppError): ErrorClassification {
-  // Only map well-known codes; the generic APP_ERROR code must fall through
-  // to message-based inference so errors without explicit codes classify well.
-  const category = error.code && error.code !== 'APP_ERROR' ? (CODE_TO_CATEGORY[error.code] ?? inferCategoryFromMessage(error.message)) : inferCategoryFromMessage(error.message);
+  const category = CODE_TO_CATEGORY[error.code] ?? inferCategoryFromMessage(error.message);
   return { category, ...DEFAULT_CLASSIFICATIONS[category] };
 }
 
@@ -40,6 +39,6 @@ function inferCategoryFromMessage(message: string): ErrorCategory {
   if (m.includes('ocr')) return 'OCR';
   if (m.includes('parser') || m.includes('parse')) return 'PARSER';
   if (m.includes('database') || m.includes('db')) return 'DATABASE';
-  if (m.includes('llm') || m.includes('ai') || m.includes('model') || m.includes('provider')) return 'AI_PROVIDER';
+  if (m.includes('ai') || m.includes('model') || m.includes('llm')) return 'AI_PROVIDER';
   return 'UNKNOWN';
 }

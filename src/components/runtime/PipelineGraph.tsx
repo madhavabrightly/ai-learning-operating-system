@@ -21,6 +21,7 @@ const COLOR: Record<string, string> = {
 };
 
 export function PipelineGraph({ orchestrator, tick }: PipelineGraphProps) {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   void tick;
   const tasks = Array.from(orchestrator.taskRegistry.values());
 

@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react';
 import { cn } from '@/utils/cn';
 import { LoadingSpinner } from './LoadingSpinner';
 import { EmptyState } from './EmptyState';
@@ -13,9 +12,9 @@ interface AsyncBoundaryProps<T> {
   empty?: boolean;
   emptyTitle?: string;
   emptyMessage?: string;
-  emptyAction?: ReactNode;
+  emptyAction?: React.ReactNode;
   onRetry?: () => void;
-  children: (data: T) => ReactNode;
+  children: (data: T) => React.ReactNode;
   className?: string;
 }
 

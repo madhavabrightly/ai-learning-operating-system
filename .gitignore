@@ -12,17 +12,6 @@ dist
 dist-ssr
 *.local
 
-# Secrets — never commit keys
-.env
-.env.*
-!.env.example
-server/.env
-server/.env.*
-!server/.env.example
-
-# Command Code local session state — never commit
-.commandcode/
-
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

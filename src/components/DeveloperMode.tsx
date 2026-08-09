@@ -138,8 +138,12 @@ function EventStream({ container }: { container: IContainer }) {
 }
 
 function PluginState({ container }: { container: IContainer }) {
-  const registry = container.resolve<PluginRegistry>(TOKENS.pluginRegistry);
-  const [plugins] = useState<import('@/modules/plugins/types/PluginTypes').PluginMetadata[]>(() => registry.list());
+  const [plugins, setPlugins] = useState<import('@/modules/plugins/types/PluginTypes').PluginMetadata[]>([]);
+
+  useEffect(() => {
+    const registry = container.resolve<PluginRegistry>(TOKENS.pluginRegistry);
+    setPlugins(registry.list());
+  }, [container]);
 
   return (
     <div className="space-y-2">
@@ -199,6 +203,7 @@ function SocketStatus({ container }: { container: IContainer }) {
   const [status, setStatus] = useState(client.status);
 
   useEffect(() => {
+    setStatus(client.status);
     const interval = setInterval(() => setStatus(client.status), 1000);
     return () => clearInterval(interval);
   }, [client]);

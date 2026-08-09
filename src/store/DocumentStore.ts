@@ -1,12 +1,8 @@
 import { create } from 'zustand';
 import type { IEventBus } from '@/events/types';
 import { EventTopics } from '@/events/EventTopics';
-import type { DocumentService } from '@/modules/document/service/DocumentService';
-import type {
-  DocumentSelection,
-  ParsedDocument,
-  DocumentPage,
-} from '@/modules/document/model/DocumentModel';
+import type { IDocumentService } from '@/modules/document/types/DocumentTypes';
+import type { DocumentReference, DocumentPage, DocumentStructure, DocumentQuality, DocumentSelection } from '@/modules/document/types/DocumentTypes';
 import type { WorkspaceContextState } from '@/modules/workspace/types/WorkspaceTypes';
 
 export interface WebPageSource {
@@ -16,46 +12,38 @@ export interface WebPageSource {
 }
 
 export interface DocumentState {
-  documents: ParsedDocument[];
+  documents: DocumentReference[];
   currentDocumentId?: string;
-  currentDocument?: ParsedDocument;
   pages: DocumentPage[];
+  structure?: DocumentStructure;
+  quality?: DocumentQuality;
   page: number;
   zoom: number;
   searchResults: DocumentSelection[];
   selection?: WorkspaceContextState['selection'];
-  processing?: ParsedDocument['processing'];
   loading: boolean;
   error?: string;
 }
 
 export interface DocumentActions {
-  upload: (file: File) => Promise<ParsedDocument | undefined>;
-  open: (documentId: string) => Promise<ParsedDocument | undefined>;
+  upload: (file: File) => Promise<DocumentReference | undefined>;
+  open: (documentId: string) => Promise<DocumentReference | undefined>;
   setPage: (page: number) => void;
   setZoom: (zoom: number) => void;
   setSelection: (selection: WorkspaceContextState['selection']) => void;
   search: (query: string) => Promise<void>;
-  injectWebPage: (source: WebPageSource) => Promise<void>;
-  list: () => Promise<void>;
-  delete: (documentId: string) => Promise<void>;
-  refreshProcessing: () => Promise<void>;
+  injectWebPage: (source: WebPageSource) => void;
   clearError: () => void;
 }
 
 export type DocumentStore = DocumentState & DocumentActions;
 
 export interface CreateDocumentStoreOptions {
-  service: DocumentService;
+  service: IDocumentService;
   eventBus: IEventBus;
   initial?: Partial<DocumentState>;
 }
 
-/**
- * Real document store. Backed by the real DocumentService (which persists to
- * IndexedDB). Pages, structure, quality and search results all come from the
- * actual parsed document — never fabricated.
- */
 export function createDocumentStore({ service, eventBus, initial }: CreateDocumentStoreOptions) {
   return create<DocumentStore>((set, get) => ({
     documents: [],
@@ -71,15 +59,13 @@ export function createDocumentStore({ service, eventBus, initial }: CreateDocume
       set({ loading: true, error: undefined });
       const result = await service.upload(file);
       if (result.success && result.data) {
-        const doc = result.data;
         set((state) => ({
-          documents: upsertDocument(state.documents, doc),
-          currentDocumentId: doc.id,
+          documents: [...state.documents, result.data as DocumentReference],
+          currentDocumentId: result.data?.id,
           loading: false,
-          error: undefined,
         }));
-        await get().open(doc.id);
-        return doc;
+        await get().open(result.data.id);
+        return result.data;
       }
       set({ loading: false, error: result.error ?? 'Upload failed' });
       return undefined;
@@ -87,23 +73,26 @@ export function createDocumentStore({ service, eventBus, initial }: CreateDocume
 
     open: async (documentId) => {
       set({ loading: true, error: undefined });
-      const result = await service.open(documentId);
-      if (!result.success || !result.data) {
-        set({ loading: false, error: result.error ?? 'Open failed' });
+      const refResult = await service.open(documentId);
+      if (!refResult.success || !refResult.data) {
+        set({ loading: false, error: refResult.error ?? 'Open failed' });
         return undefined;
       }
-      const doc = result.data;
+      const [pagesResult, structureResult, qualityResult] = await Promise.all([
+        service.getPages(documentId),
+        service.getStructure(documentId),
+        service.getQuality(documentId),
+      ]);
       set({
         currentDocumentId: documentId,
-        currentDocument: doc,
-        pages: doc.pages,
-        page: Math.min(get().page, Math.max(1, doc.metadata.pageCount)),
-        searchResults: [],
+        pages: pagesResult.success && pagesResult.data ? pagesResult.data : [],
+        structure: structureResult.success && structureResult.data ? structureResult.data : undefined,
+        quality: qualityResult.success && qualityResult.data ? qualityResult.data : undefined,
+        page: 1,
         loading: false,
-        error: undefined,
       });
-      eventBus.publish(EventTopics.DOCUMENT_OPENED, { documentId, title: doc.title }, 'client');
-      return doc;
+      eventBus.publish(EventTopics.DOCUMENT_OPENED, { documentId, title: refResult.data.title }, 'client');
+      return refResult.data;
     },
 
     setPage: (page) => {
@@ -135,65 +124,41 @@ export function createDocumentStore({ service, eventBus, initial }: CreateDocume
       eventBus.publish(EventTopics.DOCUMENT_SEARCH, { documentId, query, count: get().searchResults.length }, 'client');
     },
 
-    injectWebPage: async (source) => {
-      // Web pages injected into a document keep provenance (URL + title).
-      const documentId = get().currentDocumentId ?? `doc-web-${Date.now()}`;
-      const current = get().currentDocument;
-      if (!current) return;
-      const nextPage: DocumentPage = {
-        index: current.pages.length + 1,
+    injectWebPage: (source) => {
+      const state = get();
+      const documentId = state.currentDocumentId ?? `doc-web-${Date.now()}`;
+      const nextIndex = state.pages.length + 1;
+      const page: DocumentPage = {
+        index: nextIndex,
         text: `Source: ${source.url}\nTitle: ${source.title}\n\n${source.text}`,
         blocks: [
-          { id: `${documentId}-web-heading`, type: 'heading', text: source.title, headingLevel: 1, source: { page: current.pages.length + 1 } },
-          { id: `${documentId}-web-text`, type: 'text', text: source.text, source: { page: current.pages.length + 1 } },
+          { type: 'heading', x: 40, y: 60, width: 400, height: 30, text: source.title },
+          { type: 'text', x: 40, y: 110, width: 500, height: 200, text: source.text },
         ],
-        blockIds: [],
       };
-      const updated: ParsedDocument = {
-        ...current,
-        pages: [...current.pages, nextPage],
-        metadata: { ...current.metadata, pageCount: current.pages.length + 1 },
-      };
+
+      let documents = state.documents;
+      const exists = documents.some((d) => d.id === documentId);
+      if (!exists) {
+        const ref: DocumentReference = {
+          id: documentId,
+          title: `Web: ${source.title}`,
+          source: source.url,
+          mimeType: 'text/html',
+          uploadedAt: Date.now(),
+        };
+        documents = [...documents, ref];
+      }
+
       set({
-        currentDocument: updated,
-        pages: updated.pages,
-        page: updated.pages.length,
+        documents,
+        currentDocumentId: documentId,
+        pages: [...state.pages, page],
+        page: nextIndex,
       });
       eventBus.publish(EventTopics.DOCUMENT_OPENED, { documentId, title: source.title, source: source.url }, 'client');
     },
 
-    list: async () => {
-      const result = await service.listDocuments();
-      set({ documents: result.success && result.data ? result.data : [] });
-    },
-
-    delete: async (documentId) => {
-      await service.deleteDocument(documentId);
-      const state = get();
-      const next = state.documents.filter((d) => d.id !== documentId);
-      set({
-        documents: next,
-        currentDocumentId: state.currentDocumentId === documentId ? undefined : state.currentDocumentId,
-        currentDocument: state.currentDocumentId === documentId ? undefined : state.currentDocument,
-        pages: state.currentDocumentId === documentId ? [] : state.pages,
-      });
-    },
-
-    refreshProcessing: async () => {
-      const documentId = get().currentDocumentId;
-      if (!documentId) return;
-      const result = await service.getProcessingRecord(documentId);
-      set({ processing: result.success && result.data ? result.data : undefined });
-    },
-
     clearError: () => set({ error: undefined }),
   }));
-}
-
-function upsertDocument(list: ParsedDocument[], doc: ParsedDocument): ParsedDocument[] {
-  const idx = list.findIndex((d) => d.id === doc.id);
-  if (idx === -1) return [doc, ...list];
-  const next = [...list];
-  next[idx] = doc;
-  return next;
 }

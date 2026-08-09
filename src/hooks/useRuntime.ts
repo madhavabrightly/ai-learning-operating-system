@@ -2,13 +2,10 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { useDependency } from './useContainer';
 import { TOKENS } from '@/di/tokens';
 import { RuntimeOrchestrator } from '@/runtime/scheduler/RuntimeOrchestrator';
-import { buildDocumentPipeline } from '@/runtime/factories/buildDocumentPipeline';
-import type { IEventBus } from '@/events/types';
 import type { Task } from '@/runtime/types';
 
 export function useRuntime() {
   const orchestrator = useDependency<RuntimeOrchestrator>(TOKENS.orchestrator);
-  const eventBus = useDependency<IEventBus>(TOKENS.eventBus);
 
   const [, setTick] = useState(0);
 
@@ -19,13 +16,11 @@ export function useRuntime() {
 
   const tasks = Array.from(orchestrator.taskRegistry.values());
 
-  /** Run the REAL processing pipeline for an uploaded document. */
-  const runDocumentPipeline = useCallback(
-    (documentId: string) => {
+  const runDemo = useCallback(
+    (documentId?: string) => {
       orchestrator.start();
-      const pipeline = orchestrator.createPipeline(buildDocumentPipeline(documentId));
-      void orchestrator.submitPipeline(pipeline);
-      return pipeline.id;
+      const eventBus = (orchestrator as unknown as { eventBus?: { publish: (topic: string, payload: unknown) => void } }).eventBus;
+      eventBus?.publish('demo.pipeline.start', { documentId });
     },
     [orchestrator],
   );
@@ -35,7 +30,7 @@ export function useRuntime() {
     orchestrator.start();
   }, [orchestrator]);
 
-  return { orchestrator, eventBus, tasks, runDocumentPipeline, reset };
+  return { orchestrator, tasks, runDemo, reset };
 }
 
 function subscribeTasks(orchestrator: RuntimeOrchestrator, callback: () => void) {

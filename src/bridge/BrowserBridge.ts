@@ -39,11 +39,8 @@ export function createBrowserBridge(): BrowserBridge {
         return err('File open not supported in this environment');
       }
       try {
-        const picker = window as unknown as {
-          showOpenFilePicker(opts: { types: { description: string; accept: Record<string, string[]> }[] }): Promise<{ getFile(): Promise<File> }[]>;
-        };
-        const [handle] = await picker.showOpenFilePicker({ types: [{ description: 'Documents', accept: { [accept]: [] } }] });
-        const file = await handle.getFile();
+        const [handle] = await (window as any).showOpenFilePicker({ types: [{ description: 'Documents', accept: { [accept]: [] } }] });
+        const file = await (handle as any).getFile();
         return ok(file);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));

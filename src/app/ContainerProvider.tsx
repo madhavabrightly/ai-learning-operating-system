@@ -1,5 +1,4 @@
-import { createContext } from 'react';
-import type { ReactNode } from 'react';
+import { createContext, useRef } from 'react';
 import type { IContainer } from '@/di/types';
 
 export const ContainerContext = createContext<IContainer | null>(null);
@@ -9,7 +8,8 @@ export function ContainerProvider({
   children,
 }: {
   container: IContainer;
-  children: ReactNode;
+  children: React.ReactNode;
 }) {
-  return <ContainerContext.Provider value={container}>{children}</ContainerContext.Provider>;
+  const ref = useRef(container);
+  return <ContainerContext.Provider value={ref.current}>{children}</ContainerContext.Provider>;
 }
