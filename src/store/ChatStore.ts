@@ -21,7 +21,7 @@ export interface ChatActions {
   selectConversation: (conversationId: string) => Promise<void>;
   sendMessage: (content: string, context?: { documentId?: string; selection?: string }) => Promise<void>;
   runAction: (intent: AiActionIntent, context?: { documentId?: string; selection?: string }) => Promise<void>;
-  research: (query: string, context?: { documentId?: string }) => Promise<void>;
+  research: (query: string, context?: { documentId?: string; url?: string }) => Promise<void>;
   deleteConversation: (conversationId: string) => Promise<void>;
   clearError: () => void;
 }
@@ -115,7 +115,10 @@ export function createChatStore({ service, eventBus, initial }: CreateChatStoreO
     research: async (query, context) => {
       const conversationId = get().activeConversationId;
       set({ sending: true, error: undefined });
-      const result = await service.research(conversationId ?? '', query, context ?? {});
+      const result = await service.research(conversationId ?? '', query, {
+        documentId: context?.documentId,
+        url: context?.url,
+      });
       if (result.success && result.data) {
         const messages = await service.loadConversation(result.data.conversation.id);
         set({

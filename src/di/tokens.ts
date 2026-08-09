@@ -20,6 +20,8 @@ export const TOKENS = {
   graphService: Symbol('graphService'),
   notesService: Symbol('notesService'),
   sessionEngine: Symbol('sessionEngine'),
+  sessionManager: Symbol('sessionManager'),
+  learningService: Symbol('learningService'),
   analyticsService: Symbol('analyticsService'),
   browserBridge: Symbol('browserBridge'),
   researchService: Symbol('researchService'),

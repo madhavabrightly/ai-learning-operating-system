@@ -66,6 +66,14 @@ const extractSchema = z.object({
   existingConcepts: z.array(z.string()).optional(),
 });
 
+const learnSchema = z.object({
+  documentId: z.string(),
+  text: z.string().min(1).max(200_000),
+  kind: z.enum(['questions', 'quiz', 'flashcards']),
+  count: z.number().int().min(1).max(10).optional(),
+  difficulty: z.enum(['beginner', 'intermediate', 'advanced']).optional(),
+});
+
 // ---------------------------------------------------------------------------
 // Provider helpers
 // ---------------------------------------------------------------------------
@@ -416,6 +424,130 @@ const STOP_WORDS = new Set([
   'more', 'most', 'other', 'some', 'such', 'only', 'own', 'same', 'so', 'too', 'very', 'just',
   'out', 'up', 'down', 'off', 'on', 'in', 'at', 'to', 'of', 'a', 'an', 'is', 'it', 'as', 'or',
 ]);
+
+// ---------------------------------------------------------------------------
+// Learning content generation (questions / quiz / flashcards)
+// ---------------------------------------------------------------------------
+
+const LEARN_PROMPTS: Record<z.infer<typeof learnSchema>['kind'], string> = {
+  questions:
+    'Generate study questions about the provided material. Mix basic, conceptual, application, comparison and formula questions where the material supports them. Return STRICT JSON with this exact shape (no markdown fences): {"questions":[{"question":"...","type":"basic|conceptual|application|comparison|formula","difficulty":"beginner|intermediate|advanced","answerHint":"brief answer hint","sourceSection":"section or topic this comes from","sourcePage":<page number or 0>}]}',
+  quiz:
+    'Generate a multiple-choice quiz about the provided material. Return STRICT JSON with this exact shape (no markdown fences): {"quiz":[{"question":"...","options":["A. ...","B. ...","C. ...","D. ..."],"correctIndex":<number 0-3>,"explanation":"one-sentence explanation of the correct answer","difficulty":"beginner|intermediate|advanced","sourceSection":"section or topic","sourcePage":<page number or 0>}]}',
+  flashcards:
+    'Generate flashcards from the provided material. Return STRICT JSON with this exact shape (no markdown fences): {"flashcards":[{"front":"short prompt or term","back":"concise explanation grounded in the text","concept":"the concept this card covers","difficulty":"beginner|intermediate|advanced","sourceSection":"section or topic","sourcePage":<page number or 0>}]}',
+};
+
+function learnPromptFor(kind: z.infer<typeof learnSchema>['kind']): string {
+  return LEARN_PROMPTS[kind];
+}
+
+router.post('/learn', async (req, res) => {
+  const parsed = learnSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: parsed.error.message } });
+    return;
+  }
+
+  const { documentId, text, kind, count, difficulty } = parsed.data;
+  const target = count ?? (kind === 'quiz' ? 5 : 6);
+
+  if (!isAiConfigured()) {
+    // Deterministic fallback: build items from real sentences in the text.
+    const fallback = heuristicLearn(text, documentId, kind, target);
+    res.json({ ...fallback, fallback: 'heuristic' });
+    return;
+  }
+
+  try {
+    const content = await complete(
+      [
+        {
+          role: 'system',
+          content:
+            learnPromptFor(kind) +
+            (difficulty ? ` All items should target ${difficulty} difficulty.` : '') +
+            ` Generate exactly ${target} items. Do not invent material that is not in the text.`,
+        },
+        { role: 'user', content: text.slice(0, 50_000) },
+      ],
+      { temperature: 0.4, responseFormat: { type: 'json_object' } },
+    );
+
+    const cleaned = content.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
+    const data = JSON.parse(cleaned) as Record<string, unknown>;
+    res.json({ ...data, fallback: 'ai' });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[server] AI learn failed, using heuristic', e);
+    res.json({ ...heuristicLearn(text, documentId, kind, target), fallback: 'heuristic' });
+  }
+});
+
+function heuristicLearn(text: string, documentId: string, kind: z.infer<typeof learnSchema>['kind'], count: number) {
+  const sentences = text
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 40 && s.length < 400)
+    .slice(0, Math.max(count, 8));
+
+  if (kind === 'quiz') {
+    const quiz = sentences.slice(0, count).map((sentence, i) => {
+      const main = sentence.slice(0, 160);
+      const isTrue = i % 2 === 0;
+      return {
+        question: `Which of the following statements about the material is correct? (Based on: "${main}…")`,
+        options: [
+          isTrue ? sentence : `The text does not discuss this.`,
+          isTrue ? `The text does not discuss this.` : sentence,
+          `The opposite of the material's claim.`,
+          `An unrelated statement.`,
+        ],
+        correctIndex: isTrue ? 0 : 1,
+        explanation: `The text states: "${sentence.slice(0, 220)}"`,
+        difficulty: 'beginner' as const,
+        sourceSection: 'document',
+        sourcePage: 0,
+      };
+    });
+    return { quiz };
+  }
+
+  if (kind === 'flashcards') {
+    const flashcards = sentences.slice(0, count).map((sentence, i) => {
+      const words = sentence.replace(/[^a-zA-Z ]/g, ' ').split(/\s+/).filter((w) => w.length > 4);
+      const term = words[Math.floor(i / 2) % Math.max(1, words.length)] ?? 'concept';
+      return {
+        front: `What is ${term.toLowerCase()}?`,
+        back: sentence,
+        concept: term,
+        difficulty: 'beginner' as const,
+        sourceSection: 'document',
+        sourcePage: 0,
+      };
+    });
+    return { flashcards };
+  }
+
+  const questions = sentences.slice(0, count).map((sentence, i) => {
+    const first = sentence.split(',')[0]?.replace(/[.!?]+$/, '') ?? sentence.slice(0, 80);
+    const type = ['basic', 'conceptual', 'application', 'comparison', 'formula'][i % 5] as
+      | 'basic'
+      | 'conceptual'
+      | 'application'
+      | 'comparison'
+      | 'formula';
+    return {
+      question: `Explain: ${first}${sentence.length > 120 ? '…' : ''}`,
+      type,
+      difficulty: 'beginner' as const,
+      answerHint: sentence,
+      sourceSection: 'document',
+      sourcePage: 0,
+    };
+  });
+  return { questions };
+}
 
 function heuristicExtract(text: string, documentId: string) {
   // Tokenize, count term frequency, find candidate concept terms.

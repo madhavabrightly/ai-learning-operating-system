@@ -142,7 +142,7 @@ function BlockRenderer({ block, document, pageIndex }: { block: DocumentBlock; d
       );
     }
     case 'table': {
-      const table = document.tables.find((t) => t.page === pageIndex) ?? document.tables[0];
+      const table = block.tableId ? document.tables.find((t) => t.id === block.tableId) : document.tables.find((t) => t.page === pageIndex);
       if (!table) return <p className="text-sm text-muted-foreground">[table]</p>;
       return (
         <div className="overflow-x-auto rounded border border-border">

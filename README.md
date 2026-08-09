@@ -19,11 +19,12 @@ Built with **React 18**, **TypeScript**, **Vite 7**, **TailwindCSS v4**, **Zusta
 | **Figures** | PDF images rasterized to data URLs with captions |
 | **Canonical model** | Every parser output normalized to a shared `ParsedDocument` model (pages, blocks, sections, formulas, tables, figures, index) |
 | **Search** | Real keyword search over extracted content with page provenance; section-aware retrieval |
-| **Knowledge graph** | Concepts extracted from real document text via backend AI (with deterministic heuristic fallback); no hardcoded nodes |
+| **Knowledge graph** | Concepts extracted from real document text via backend AI (with deterministic heuristic fallback); no hardcoded nodes. Interactive graph UI: click a node → description, source page, related concepts, ask-AI actions; graph search |
 | **AI chat** | Real OpenAI-compatible provider through the backend; streaming SSE; grounded context (selection, sections, pages, formulas, tables); conversation persistence |
 | **Chat actions** | Explain / Simplify / Summarize / Teach / Example / Compare / Quiz / Flashcards / Notes — all call the backend |
 | **Research** | Real web research via Bright Data Browser API (`playwright-core` CDP) or direct-fetch fallback; evidence model with full provenance (`sourceId, url, title, domain, retrievedAt, relevantText, confidence, requestId`) |
-| **Persistence** | IndexedDB for documents + chat; localStorage cache for notes/sessions/research history |
+| **Persistence** | IndexedDB for documents + chat; localStorage cache for notes/sessions/research history; full workspace session save/restore (open document, page, selection survive refresh) |
+| **Study panel** | Real quiz generation (multiple choice with evaluation), flashcards (with review state), and study questions — all generated from actual document content via the backend, persisted across sessions |
 | **Runtime Lab** | Real observability: select an uploaded document, run the real pipeline, watch real tasks/workers/retries/telemetry |
 | **Failure injection** | Developer mode: arm a real failure in the parse or concept worker; the orchestrator's real retry/fallback path executes |
 | **Retries / circuit breaker** | Real exponential backoff with jitter; CLOSED/OPEN/HALF_OPEN circuit breaker on the runtime and backend |
@@ -101,7 +102,7 @@ node e2e/verify.mjs    # real end-to-end (requires dev servers running)
 | Path | Page | Description |
 |---|---|---|
 | `/` | Dashboard | App overview |
-| `/workspace` | Workspace | Upload → view → chat → notes → research → runtime lab |
+| `/workspace` | Workspace | Upload → view → graph → study (quiz/flashcards) → chat → notes → runtime lab |
 | `/history` | History | Real conversation history (persisted) |
 | `/analytics` | Analytics | Real study + pipeline metrics from telemetry |
 | `/plugins` | Plugins | Loaded plugin registry |

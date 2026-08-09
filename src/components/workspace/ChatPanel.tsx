@@ -32,7 +32,21 @@ export function ChatPanel({ chat, documentId, selection, onOpenSource }: ChatPan
     const content = input;
     setInput('');
     if (researchMode) {
-      void chat.research(content, { documentId });
+      // A URL in the research input is fetched directly; otherwise the backend
+      // researches the query (Bright Data browser or direct-fetch fallback).
+      const trimmed = content.trim();
+      let url: string | undefined;
+      let query = trimmed;
+      try {
+        const parsed = new URL(trimmed);
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+          url = parsed.toString();
+          query = '';
+        }
+      } catch {
+        // Not a URL — treat as a query.
+      }
+      void chat.research(query || trimmed, { documentId, url });
       setResearchMode(false);
     } else {
       void chat.sendMessage(content, { documentId, selection });

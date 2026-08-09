@@ -22,6 +22,8 @@ import { GraphService } from '@/modules/graph/service/GraphService';
 import { createBackendGraphExtractor } from '@/modules/graph/service/BackendGraphExtractor';
 import { NotesService } from '@/modules/notes/service/NotesService';
 import { ResearchService } from '@/modules/research/ResearchService';
+import { LearningService } from '@/modules/learning/LearningService';
+import { createWorkspaceSessionManager } from '@/modules/session/WorkspaceSessionManager';
 import { SessionEngine } from '@/modules/session/engine/SessionEngine';
 import { AnalyticsService } from '@/modules/analytics/service/AnalyticsService';
 import { createBrowserBridge } from '@/bridge/BrowserBridge';
@@ -117,11 +119,21 @@ export function createContainer(): IContainer {
   const notesService = new NotesService(diskCache, eventBus);
   container.registerInstance(TOKENS.notesService, notesService);
 
+  const learningService = new LearningService(aiProvider, documentService, eventBus, logger.child('Learning'), diskCache);
+  container.registerInstance(TOKENS.learningService, learningService);
+
   const researchService = new ResearchService(aiProvider, eventBus, logger.child('Research'), (url) => browserBridge.openExternal(url));
   container.registerInstance(TOKENS.researchService, researchService);
 
   const sessionEngine = new SessionEngine(diskCache, documentStorage);
   container.registerInstance(TOKENS.sessionEngine, sessionEngine);
+
+  const sessionManager = createWorkspaceSessionManager(sessionEngine, eventBus, logger.child('Session'), {
+    documentStore,
+    getNotes: () => ({}),
+    getCurrentTab: () => 'library',
+  });
+  container.registerInstance(TOKENS.sessionManager, sessionManager);
 
   const analyticsService = new AnalyticsService(diskCache);
   container.registerInstance(TOKENS.analyticsService, analyticsService);

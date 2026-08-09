@@ -96,6 +96,8 @@ export interface AiProviderClient {
   streamChat(request: ChatRequest, callbacks: StreamCallbacks): Promise<void>;
   action(request: ActionRequest): Promise<ChatResponse>;
   extractConcepts(documentId: string, text: string): Promise<unknown>;
+  /** Generate learning content (questions/quiz/flashcards) from document text. */
+  learn(input: { documentId: string; text: string; kind: 'questions' | 'quiz' | 'flashcards'; count?: number; difficulty?: string }): Promise<unknown>;
   research(query: string, url?: string, maxResults?: number): Promise<ResearchResult>;
   health(): Promise<{ status: string; config: Record<string, unknown> }>;
 }
@@ -181,6 +183,10 @@ export function createAiProviderClient(client: BackendHttpClient, fetchImpl?: ty
 
     async extractConcepts(documentId, text) {
       return client.post('/api/ai/extract', { documentId, text });
+    },
+
+    async learn(input) {
+      return client.post('/api/ai/learn', input);
     },
 
     async research(query, url, maxResults) {

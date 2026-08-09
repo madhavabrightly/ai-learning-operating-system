@@ -384,6 +384,28 @@ export function normalizeParserOutput(output: ParserOutput, options: NormalizeOp
     source: { page: t.page, bbox: t.bbox },
   }));
 
+  // Attach tableId to table blocks so the viewer resolves the exact table.
+  const tableBlocksByPage = new Map<number, typeof tables>();
+  for (const t of tables) {
+    const list = tableBlocksByPage.get(t.page) ?? [];
+    list.push(t);
+    tableBlocksByPage.set(t.page, list);
+  }
+  for (const page of pages) {
+    const pageTables = tableBlocksByPage.get(page.index) ?? [];
+    let tableIdx = 0;
+    for (const block of page.blocks) {
+      if (block.type === 'table') {
+        const table = pageTables[tableIdx];
+        if (table) {
+          block.tableId = table.id;
+          block.text = block.text ?? table.caption;
+        }
+        tableIdx++;
+      }
+    }
+  }
+
   const figures = (output.figures ?? []).map((f, i) => ({
     id: `${documentId}-figure-${i + 1}`,
     page: f.page,

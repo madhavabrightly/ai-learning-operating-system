@@ -34,7 +34,7 @@ export interface ChatResult {
 export interface IChatService {
   sendMessage(conversationId: string | undefined, content: string, context: { documentId?: string; selection?: string }, options?: SendMessageOptions): Promise<Result<ChatResult>>;
   runAction(conversationId: string, intent: AiActionIntent, context: { documentId?: string; selection?: string }): Promise<Result<ChatResult>>;
-  research(conversationId: string, query: string, context: { documentId?: string }): Promise<Result<ChatResult>>;
+  research(conversationId: string, query: string, context: { documentId?: string; url?: string }): Promise<Result<ChatResult>>;
   listConversations(): Promise<Result<Conversation[]>>;
   loadConversation(conversationId: string): Promise<Result<ChatMessage[]>>;
   newConversation(documentId?: string): Conversation;
@@ -192,7 +192,7 @@ export class ChatService implements IChatService {
   async research(
     conversationId: string,
     query: string,
-    context: { documentId?: string },
+    context: { documentId?: string; url?: string },
   ): Promise<Result<ChatResult>> {
     try {
       const conversation = await this.getConversation(conversationId);
@@ -202,14 +202,15 @@ export class ChatService implements IChatService {
         id: uuid(),
         conversationId: effective.id,
         role: 'user',
-        content: `Research: ${query}`,
+        content: `Research: ${query}${context.url ? ` (${context.url})` : ''}`,
         createdAt: Date.now(),
         status: 'complete',
         documentId: context.documentId,
       };
       await this.deps.persistence.saveMessage(userMessage);
 
-      const researchResult = await this.deps.provider.research(query);
+      const researchQuery = query.trim() || (context.url ?? '');
+      const researchResult = await this.deps.provider.research(researchQuery, context.url);
 
       if (researchResult.mechanism === 'error' || researchResult.error) {
         const message = researchResult.error?.message ?? 'Research failed';

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Library, MessageSquare, StickyNote, Activity } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Library, MessageSquare, StickyNote, Activity, Network, GraduationCap } from 'lucide-react';
 import { useDependency } from '@/hooks/useContainer';
 import { useRuntime, useRuntimeTasks } from '@/hooks/useRuntime';
 import { TOKENS } from '@/di/tokens';
@@ -8,10 +8,15 @@ import { DocumentViewer } from '@/components/workspace/DocumentViewer';
 import { ChatPanel } from '@/components/workspace/ChatPanel';
 import { NotesPanel } from '@/components/workspace/NotesPanel';
 import { RuntimeLab } from '@/components/workspace/RuntimeLab';
+import { KnowledgeGraphPanel } from '@/components/workspace/KnowledgeGraphPanel';
+import { QuizFlashcardsPanel } from '@/components/workspace/QuizFlashcardsPanel';
 import type { DocumentStore as DocumentStoreApi } from '@/store/DocumentStore';
 import type { ChatStore as ChatStoreApi } from '@/store/ChatStore';
 import type { NotesService } from '@/modules/notes/service/NotesService';
 import type { IResearchService } from '@/modules/research/ResearchService';
+import type { GraphService } from '@/modules/graph/service/GraphService';
+import type { LearningService } from '@/modules/learning/LearningService';
+import type { WorkspaceSessionManager } from '@/modules/session/WorkspaceSessionManager';
 import type { FailureInjector } from '@/runtime/injection/FailureInjector';
 import { cn } from '@/utils/cn';
 import type { UseBoundStore, StoreApi } from 'zustand';
@@ -19,13 +24,16 @@ import type { UseBoundStore, StoreApi } from 'zustand';
 type DocumentStore = UseBoundStore<StoreApi<DocumentStoreApi>>;
 type ChatStore = UseBoundStore<StoreApi<ChatStoreApi>>;
 
-type WorkspaceTab = 'library' | 'chat' | 'notes' | 'runtime';
+type WorkspaceTab = 'library' | 'chat' | 'notes' | 'runtime' | 'graph' | 'study';
 
 export function WorkspacePage() {
   const documentStore = useDependency<DocumentStore>(TOKENS.documentStore);
   const chatStore = useDependency<ChatStore>(TOKENS.chatStore);
   const notesService = useDependency<NotesService>(TOKENS.notesService);
   const researchService = useDependency<IResearchService>(TOKENS.researchService);
+  const graphService = useDependency<GraphService>(TOKENS.graphService);
+  const learningService = useDependency<LearningService>(TOKENS.learningService);
+  const sessionManager = useDependency<WorkspaceSessionManager>(TOKENS.sessionManager);
   const { orchestrator, runDocumentPipeline, reset } = useRuntime();
   const runtimeTasks = useRuntimeTasks();
   const failureInjector = useDependency<FailureInjector>(TOKENS.failureInjector);
@@ -34,11 +42,33 @@ export function WorkspacePage() {
   const state = documentStore();
   const chat = chatStore();
 
-  // Load existing documents + conversations on mount.
+  // Load existing documents + conversations on mount, then restore the last
+  // saved workspace session once documents are available.
+  const sessionReady = useRef(false);
   useEffect(() => {
-    void documentStore.getState().list();
-    void chatStore.getState().init();
-  }, [documentStore, chatStore]);
+    let cancelled = false;
+    async function boot() {
+      await documentStore.getState().list();
+      await chatStore.getState().init();
+      if (cancelled) return;
+      await sessionManager.restore();
+      sessionReady.current = true;
+    }
+    void boot();
+    return () => {
+      cancelled = true;
+    };
+  }, [documentStore, chatStore, sessionManager]);
+
+  // Persist the workspace session as real state changes (only after restore
+  // has completed so a fresh boot never clobbers the saved snapshot).
+  useEffect(() => {
+    const unsub = documentStore.subscribe(() => {
+      if (!sessionReady.current) return;
+      void sessionManager.save();
+    });
+    return unsub;
+  }, [documentStore, sessionManager]);
 
   const handleUpload = useCallback(
     async (file: File) => {
@@ -90,6 +120,12 @@ export function WorkspacePage() {
           </TabButton>
           <TabButton active={tab === 'chat'} onClick={() => setTab('chat')} icon={<MessageSquare className="h-3.5 w-3.5" />}>
             Chat
+          </TabButton>
+          <TabButton active={tab === 'graph'} onClick={() => setTab('graph')} icon={<Network className="h-3.5 w-3.5" />}>
+            Graph
+          </TabButton>
+          <TabButton active={tab === 'study'} onClick={() => setTab('study')} icon={<GraduationCap className="h-3.5 w-3.5" />}>
+            Study
           </TabButton>
           <TabButton active={tab === 'notes'} onClick={() => setTab('notes')} icon={<StickyNote className="h-3.5 w-3.5" />}>
             Notes
@@ -171,6 +207,30 @@ export function WorkspacePage() {
                 documentId={state.currentDocumentId}
                 page={state.page}
                 selection={selectedText}
+              />
+            </div>
+          )}
+          {tab === 'graph' && (
+            <div className="h-full rounded-lg border border-border bg-background p-3">
+              <KnowledgeGraphPanel
+                graphService={graphService}
+                documentId={state.currentDocumentId}
+                document={state.currentDocument}
+                chatStore={chatStore}
+                onNavigateToPage={(p) => documentStore.getState().setPage(p)}
+                onSelectText={(text) => documentStore.getState().setSelection({ text })}
+              />
+            </div>
+          )}
+          {tab === 'study' && (
+            <div className="h-full rounded-lg border border-border bg-background p-3">
+              <QuizFlashcardsPanel
+                learningService={learningService}
+                documentId={state.currentDocumentId}
+                onAskAi={(question) => {
+                  setTab('chat');
+                  void chatStore.getState().sendMessage(question, { documentId: state.currentDocumentId });
+                }}
               />
             </div>
           )}
