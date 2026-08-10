@@ -197,15 +197,18 @@ export function ChatPanel({ chat, documentId, selection, onOpenSource }: ChatPan
         </div>
       )}
 
-      {/* Input */}
-      <div className="mt-2 flex gap-2">
+      {/* Input wrapped in a form so Enter is handled natively with preventDefault */}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          send();
+        }}
+        className="mt-2 flex gap-2"
+      >
         <input
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) send();
-          }}
           placeholder={researchMode ? 'Research query (web)…' : 'Ask about the document…'}
           className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
@@ -220,8 +223,7 @@ export function ChatPanel({ chat, documentId, selection, onOpenSource }: ChatPan
           </button>
         ) : (
           <button
-            type="button"
-            onClick={send}
+            type="submit"
             disabled={!input.trim()}
             className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary transition-colors hover:bg-primary/90 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
             aria-label="Send message"
@@ -229,7 +231,7 @@ export function ChatPanel({ chat, documentId, selection, onOpenSource }: ChatPan
             <Send className="h-4 w-4" />
           </button>
         )}
-      </div>
+      </form>
     </div>
   );
 }
