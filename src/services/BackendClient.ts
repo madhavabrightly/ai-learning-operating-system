@@ -26,14 +26,13 @@ export class BackendHttpClient {
     return this.baseUrl;
   }
 
-  private async headers(extra?: Record<string, string>): Promise<Record<string, string>> {
-    const token = await getAuthToken();
-    return { ...(extra ?? {}), Authorization: `Bearer ${token}` };
+  private headers(extra?: Record<string, string>): Record<string, string> {
+    return { ...(extra ?? {}), Authorization: `Bearer ${getAuthToken()}` };
   }
 
   async get<T = unknown>(path: string): Promise<T> {
     const res = await this.doFetch(`${this.baseUrl}${path}`, {
-      headers: await this.headers(),
+      headers: this.headers(),
     });
     if (!res.ok) {
       throw new AppError({
@@ -48,7 +47,7 @@ export class BackendHttpClient {
   async post<T = unknown>(path: string, body?: unknown): Promise<T> {
     const res = await this.doFetch(`${this.baseUrl}${path}`, {
       method: 'POST',
-      headers: await this.headers({ 'Content-Type': 'application/json' }),
+      headers: this.headers({ 'Content-Type': 'application/json' }),
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {
@@ -71,7 +70,7 @@ export class BackendHttpClient {
   async delete(path: string): Promise<void> {
     const res = await this.doFetch(`${this.baseUrl}${path}`, {
       method: 'DELETE',
-      headers: await this.headers(),
+      headers: this.headers(),
     });
     if (!res.ok) {
       throw new AppError({

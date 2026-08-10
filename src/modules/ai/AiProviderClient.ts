@@ -114,11 +114,10 @@ function endpoint(): string {
   return FUNCTION_URL;
 }
 
-async function authHeaders(): Promise<Record<string, string>> {
-  const token = await getAuthToken();
+function authHeaders(): Record<string, string> {
   return {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
+    Authorization: `Bearer ${getAuthToken()}`,
   };
 }
 
@@ -201,7 +200,7 @@ export function createAiProviderClient(_client?: unknown, fetchImpl?: typeof fet
       return withRetry(async () => {
         const res = await doFetch(baseUrl, {
           method: 'POST',
-          headers: await authHeaders(),
+          headers: authHeaders(),
           body: JSON.stringify({
             model: OPENROUTER_DEFAULT_MODEL,
             messages: built,
@@ -235,7 +234,7 @@ export function createAiProviderClient(_client?: unknown, fetchImpl?: typeof fet
         try {
           res = await doFetch(baseUrl, {
             method: 'POST',
-            headers: await authHeaders(),
+            headers: authHeaders(),
             body: JSON.stringify({
               model: OPENROUTER_DEFAULT_MODEL,
               messages: built,
@@ -378,7 +377,7 @@ export function createAiProviderClient(_client?: unknown, fetchImpl?: typeof fet
         return withRetry(async () => {
           const res = await doFetch(baseUrl, {
             method: 'POST',
-            headers: await authHeaders(),
+            headers: authHeaders(),
             body: JSON.stringify(body),
           });
           if (!res.ok) throw await parseError(res);

@@ -1,5 +1,4 @@
 import { supabase } from '@/config/SupabaseConfig';
-import { ensureAuthSession } from '@/services/authSession';
 
 export interface FetchPageOptions {
   url: string;
@@ -22,12 +21,11 @@ export class BrightDataError extends Error {
 }
 
 /**
- * Session bootstrap shared with the rest of the app (see authSession.ts).
- * Never throws: if anonymous sign-in is unavailable, `functions.invoke`
- * still authenticates via the publishable key fallback.
+ * Session bootstrap — no-op.
+ * Edge Functions now accept the publishable key directly (verify_jwt=false).
  */
 async function ensureAnonymousSession(): Promise<void> {
-  await ensureAuthSession();
+  // no-op
 }
 
 function coerceToString(value: unknown): string {
