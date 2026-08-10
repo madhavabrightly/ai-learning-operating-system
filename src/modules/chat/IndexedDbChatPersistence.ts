@@ -1,5 +1,3 @@
-import { ok, err } from '@/errors/ResultFactory';
-import type { Result } from '@/errors/types';
 import type { ChatPersistence, ChatMessage, Conversation } from './ChatTypes';
 
 const DB_NAME = 'aios-chat';

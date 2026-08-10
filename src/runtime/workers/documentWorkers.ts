@@ -1,6 +1,6 @@
-import type { IWorker, WorkerContext, IWorkerType } from '@/runtime/types';
+import type { IWorker, WorkerContext } from '@/runtime/types';
 import type { DocumentService } from '@/modules/document/service/DocumentService';
-import type { FailureInjector } from './FailureInjector';
+import type { FailureInjector } from '@/runtime/injection/FailureInjector';
 import { ok, err } from '@/errors/ResultFactory';
 import { AppError } from '@/errors/AppError';
 

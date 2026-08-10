@@ -4,12 +4,13 @@ import { cn } from '@/utils/cn';
 import type { GraphService } from '@/modules/graph/service/GraphService';
 import type { KnowledgeGraph, Concept, ConceptRelationship } from '@/modules/graph/types/GraphTypes';
 import type { ChatStore } from '@/store/ChatStore';
+import type { UseBoundStore, StoreApi } from 'zustand';
 
 export interface KnowledgeGraphPanelProps {
   graphService: GraphService;
   documentId?: string;
   document?: unknown;
-  chatStore: ChatStore;
+  chatStore: UseBoundStore<StoreApi<ChatStore>>;
   onNavigateToPage: (page: number) => void;
   onSelectText: (text: string) => void;
 }
@@ -21,7 +22,7 @@ const TYPE_LABELS: Record<ConceptRelationship['type'], string> = {
   leads_to: 'leads to',
 };
 
-export function KnowledgeGraphPanel({ graphService, documentId, document, chatStore }: KnowledgeGraphPanelProps) {
+export function KnowledgeGraphPanel({ graphService, documentId, document: _document, chatStore }: KnowledgeGraphPanelProps) {
   const [graph, setGraph] = useState<KnowledgeGraph | undefined>();
   const [selected, setSelected] = useState<Concept | undefined>();
   const [loading, setLoading] = useState(false);

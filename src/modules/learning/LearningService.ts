@@ -21,7 +21,7 @@ export class LearningService {
     private readonly documents: DocumentService,
     private readonly eventBus: IEventBus,
     private readonly logger: ILogger,
-    private readonly cache: ICache,
+    private readonly _cache: ICache,
   ) {}
 
   async generate(

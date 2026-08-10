@@ -125,7 +125,7 @@ export function createContainer(): IContainer {
   const researchService = new ResearchService(aiProvider, eventBus, logger.child('Research'), (url) => browserBridge.openExternal(url));
   container.registerInstance(TOKENS.researchService, researchService);
 
-  const sessionEngine = new SessionEngine(diskCache, documentStorage);
+  const sessionEngine = new SessionEngine(diskCache);
   container.registerInstance(TOKENS.sessionEngine, sessionEngine);
 
   const sessionManager = createWorkspaceSessionManager(sessionEngine, eventBus, logger.child('Session'), {

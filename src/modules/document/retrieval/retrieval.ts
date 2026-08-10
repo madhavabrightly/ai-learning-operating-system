@@ -1,4 +1,4 @@
-import type { ParsedDocument, DocumentPage, Formula, Table } from '../model/DocumentModel';
+import type { ParsedDocument, DocumentPage } from '../model/DocumentModel';
 
 export interface RetrievedChunk {
   page: number;
@@ -25,7 +25,7 @@ export function retrieveChunks(
   const candidates: RetrievedChunk[] = [];
 
   for (const page of doc.pages) {
-    const pageText = pageTextOf(doc, page);
+    const pageText = pageTextOf(page);
     const score = scoreText(pageText, terms);
     if (score > 0) {
       candidates.push({ page: page.index, text: excerpt(pageText, maxChars), score });
@@ -49,7 +49,7 @@ export function retrieveChunks(
   return candidates.slice(0, count);
 }
 
-function pageTextOf(doc: ParsedDocument, page: DocumentPage): string {
+function pageTextOf(page: DocumentPage): string {
   const blocks = page.blocks?.map((b) => b.text ?? '').join('\n') ?? '';
   return page.text || blocks;
 }

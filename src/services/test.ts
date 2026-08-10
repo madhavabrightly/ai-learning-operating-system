@@ -1,1 +1,1 @@
-placeholder
+// Test placeholder — remove once real tests are added.

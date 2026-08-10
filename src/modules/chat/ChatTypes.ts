@@ -1,5 +1,3 @@
-import type { Result } from '@/errors/types';
-
 // ---------------------------------------------------------------------------
 // Chat message, conversation, and persistence interfaces
 // ---------------------------------------------------------------------------

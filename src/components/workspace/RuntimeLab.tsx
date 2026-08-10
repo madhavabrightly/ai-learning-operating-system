@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Activity, Play, RotateCcw, AlertTriangle, Terminal } from 'lucide-react';
+import { Activity, Play, RotateCcw } from 'lucide-react';
 import { cn } from '@/utils/cn';
 import type { Task, TelemetrySnapshot } from '@/runtime/types';
 import type { FailureInjector } from '@/runtime/injection/FailureInjector';

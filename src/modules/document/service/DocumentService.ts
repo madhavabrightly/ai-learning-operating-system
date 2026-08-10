@@ -30,8 +30,8 @@ export class DocumentService implements IDocumentService {
   constructor(
     private readonly eventBus: IEventBus,
     private readonly logger: ILogger,
-    private readonly storage?: IndexedDbDocumentStorage,
-    private readonly options: DocumentServiceOptions = {},
+    private readonly _storage?: IndexedDbDocumentStorage,
+    private readonly _options: DocumentServiceOptions = {},
   ) {}
 
   async upload(file: File, documentId?: string): Promise<Result<DocumentReference>> {

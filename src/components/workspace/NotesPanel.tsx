@@ -1,9 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { StickyNote, Plus, Trash2 } from 'lucide-react';
-import { cn } from '@/utils/cn';
 import type { NotesService } from '@/modules/notes/service/NotesService';
 import type { Note, NoteAttachment } from '@/modules/notes/types/NotesTypes';
-import type { UseBoundStore, StoreApi } from 'zustand';
 
 export interface NotesPanelProps {
   notesService: NotesService;

@@ -1,5 +1,3 @@
-import type { Result } from '@/errors/types';
-
 // ---------------------------------------------------------------------------
 // Canonical document model — every parser output normalizes into these types.
 // ---------------------------------------------------------------------------

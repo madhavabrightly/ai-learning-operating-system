@@ -30,7 +30,7 @@ interface StudyQuestion {
 
 type Content = Flashcard[] | QuizQuestion[] | StudyQuestion[];
 
-export function QuizFlashcardsPanel({ learningService, documentId, onAskAi }: QuizFlashcardsPanelProps) {
+export function QuizFlashcardsPanel({ learningService, documentId, onAskAi: _onAskAi }: QuizFlashcardsPanelProps) {
   const [mode, setMode] = useState<StudyContentKind>('questions');
   const [content, setContent] = useState<Content | undefined>();
   const [loading, setLoading] = useState(false);

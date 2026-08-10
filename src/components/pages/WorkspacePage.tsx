@@ -34,7 +34,7 @@ export function WorkspacePage() {
   const graphService = useDependency<GraphService>(TOKENS.graphService);
   const learningService = useDependency<LearningService>(TOKENS.learningService);
   const sessionManager = useDependency<WorkspaceSessionManager>(TOKENS.sessionManager);
-  const { orchestrator, runDocumentPipeline, reset } = useRuntime();
+  const { orchestrator, runDemo, reset } = useRuntime();
   const runtimeTasks = useRuntimeTasks();
   const failureInjector = useDependency<FailureInjector>(TOKENS.failureInjector);
   const [tab, setTab] = useState<WorkspaceTab>('library');
@@ -75,11 +75,11 @@ export function WorkspacePage() {
       const doc = await documentStore.getState().upload(file);
       if (doc) {
         // Kick off the real pipeline for the uploaded document.
-        const pipelineId = runDocumentPipeline(doc.id);
-        if (pipelineId) setTab('runtime');
+        runDemo(doc.id);
+        setTab('runtime');
       }
     },
-    [documentStore, runDocumentPipeline],
+    [documentStore, runDemo],
   );
 
   const handleOpen = useCallback(
@@ -238,9 +238,9 @@ export function WorkspacePage() {
             <div className="h-full rounded-lg border border-border bg-background p-3">
               <RuntimeLab
                 tasks={runtimeTasks}
-                runPipeline={(id) => runDocumentPipeline(id)}
+                runPipeline={(id) => runDemo(id)}
                 reset={reset}
-                documents={state.documents.map((d) => ({ id: d.id, title: d.title, status: d.status }))}
+                documents={state.documents.map((d) => ({ id: d.id, title: d.title }))}
                 getTelemetry={() => orchestrator.getTelemetry()}
                 failureInjector={failureInjector}
               />

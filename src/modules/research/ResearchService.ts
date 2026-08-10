@@ -17,7 +17,7 @@ export class ResearchService implements IResearchService {
   constructor(
     private readonly provider: AiProviderClient,
     private readonly eventBus: IEventBus,
-    private readonly logger: ILogger,
+    private readonly _logger: ILogger,
     private readonly openExternal: (url: string) => Promise<Result<void>>,
   ) {}
 
