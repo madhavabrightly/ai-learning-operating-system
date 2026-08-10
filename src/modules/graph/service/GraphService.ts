@@ -100,12 +100,12 @@ export class GraphService implements IGraphService {
     const cached =
       this.graphs.get(id);
 
+    // A cache hit is a read — do NOT re-publish CONCEPTS_EXTRACTED here.
+    // load() is called by components that also subscribe to that event;
+    // re-publishing on every load created a publish → reload → publish
+    // feedback loop that overflowed the call stack. The event is only
+    // emitted when extraction actually completes (see extractGraph).
     if (cached) {
-      this.publishGraph(
-        id,
-        cached,
-      );
-
       return ok(cached);
     }
 

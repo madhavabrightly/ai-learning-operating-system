@@ -48,12 +48,20 @@ export function KnowledgeGraphPanel({ graphService, documentId, document: _docum
   const [recommendations, setRecommendations] = useState<Concept[] | undefined>();
   const [detailLoading, setDetailLoading] = useState(false);
 
+  // Tracks the document a load is currently fetching for. GraphService.load()
+  // publishes CONCEPTS_EXTRACTED when extraction completes, and this panel
+  // subscribes to that event — without this guard the panel would reload in
+  // response to its own load (publish → reload → publish → … stack overflow).
+  const inFlightDocRef = useRef<string | undefined>(undefined);
+
   const loadGraph = useCallback(async () => {
     if (!documentId) {
+      inFlightDocRef.current = undefined;
       setGraph(undefined);
       setSelected(undefined);
       return;
     }
+    inFlightDocRef.current = documentId;
     setLoading(true);
     setError(undefined);
     const result = await graphService.load(documentId);
@@ -62,17 +70,21 @@ export function KnowledgeGraphPanel({ graphService, documentId, document: _docum
     } else {
       setError(result.error ?? 'Failed to load graph');
     }
+    if (inFlightDocRef.current === documentId) {
+      inFlightDocRef.current = undefined;
+    }
     setLoading(false);
   }, [graphService, documentId]);
 
   useEffect(() => { void loadGraph(); }, [loadGraph]);
 
   // load → CONCEPTS_EXTRACTED → keep the panel in sync when extraction
-  // completes for the current document.
+  // completes for the current document. Events published by our own in-flight
+  // load() are skipped — that graph is already being delivered by the load.
   useEvent<ConceptsExtractedPayload>(EventTopics.CONCEPTS_EXTRACTED, (event) => {
-    if (event.payload.documentId === documentId) {
-      void loadGraph();
-    }
+    if (event.payload.documentId !== documentId) return;
+    if (inFlightDocRef.current === documentId) return;
+    void loadGraph();
   });
 
   const loadConceptDetail = useCallback(
