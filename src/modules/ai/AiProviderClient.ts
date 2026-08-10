@@ -1,5 +1,6 @@
 import { AppError } from '@/errors/AppError';
-import { SUPABASE_URL, SUPABASE_ANON_KEY, OPENROUTER_FUNCTION, OPENROUTER_DEFAULT_MODEL, AI_RETRY } from '@/constants/config';
+import { SUPABASE_URL, OPENROUTER_FUNCTION, OPENROUTER_DEFAULT_MODEL, AI_RETRY } from '@/constants/config';
+import { getAuthToken } from '@/services/authSession';
 import { buildChatPrompt, buildStructuredPrompt } from '@/modules/ai/promptBuilder';
 
 // ---------------------------------------------------------------------------
@@ -113,10 +114,11 @@ function endpoint(): string {
   return FUNCTION_URL;
 }
 
-function authHeaders(): Record<string, string> {
+async function authHeaders(): Promise<Record<string, string>> {
+  const token = await getAuthToken();
   return {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    Authorization: `Bearer ${token}`,
   };
 }
 
@@ -199,7 +201,7 @@ export function createAiProviderClient(_client?: unknown, fetchImpl?: typeof fet
       return withRetry(async () => {
         const res = await doFetch(baseUrl, {
           method: 'POST',
-          headers: authHeaders(),
+          headers: await authHeaders(),
           body: JSON.stringify({
             model: OPENROUTER_DEFAULT_MODEL,
             messages: built,
@@ -233,7 +235,7 @@ export function createAiProviderClient(_client?: unknown, fetchImpl?: typeof fet
         try {
           res = await doFetch(baseUrl, {
             method: 'POST',
-            headers: authHeaders(),
+            headers: await authHeaders(),
             body: JSON.stringify({
               model: OPENROUTER_DEFAULT_MODEL,
               messages: built,
@@ -376,7 +378,7 @@ export function createAiProviderClient(_client?: unknown, fetchImpl?: typeof fet
         return withRetry(async () => {
           const res = await doFetch(baseUrl, {
             method: 'POST',
-            headers: authHeaders(),
+            headers: await authHeaders(),
             body: JSON.stringify(body),
           });
           if (!res.ok) throw await parseError(res);

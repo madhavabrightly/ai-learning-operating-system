@@ -1,4 +1,5 @@
 import { supabase } from '@/config/SupabaseConfig';
+import { ensureAuthSession } from '@/services/authSession';
 
 export interface FetchPageOptions {
   url: string;
@@ -20,22 +21,13 @@ export class BrightDataError extends Error {
   }
 }
 
-let signedInAnonymously = false;
-
+/**
+ * Session bootstrap shared with the rest of the app (see authSession.ts).
+ * Never throws: if anonymous sign-in is unavailable, `functions.invoke`
+ * still authenticates via the publishable key fallback.
+ */
 async function ensureAnonymousSession(): Promise<void> {
-  if (signedInAnonymously) return;
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  if (session) {
-    signedInAnonymously = true;
-    return;
-  }
-  const { error } = await supabase.auth.signInAnonymously();
-  if (error) {
-    throw new BrightDataError(`Could not start session: ${error.message}`);
-  }
-  signedInAnonymously = true;
+  await ensureAuthSession();
 }
 
 function coerceToString(value: unknown): string {

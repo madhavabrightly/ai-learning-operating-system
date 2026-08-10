@@ -1,4 +1,5 @@
 import { AppError } from '@/errors/AppError';
+import { getAuthToken } from '@/services/authSession';
 
 export interface BackendClientOptions {
   baseUrl: string;
@@ -8,6 +9,9 @@ export interface BackendClientOptions {
 /**
  * HTTP client for the backend API.
  * Used by AiProviderClient, GraphExtractor, and other services.
+ *
+ * Every request carries `Authorization: Bearer <token>` — the active session
+ * token when available, otherwise the publishable key (see authSession.ts).
  */
 export class BackendHttpClient {
   private readonly baseUrl: string;
@@ -22,8 +26,15 @@ export class BackendHttpClient {
     return this.baseUrl;
   }
 
+  private async headers(extra?: Record<string, string>): Promise<Record<string, string>> {
+    const token = await getAuthToken();
+    return { ...(extra ?? {}), Authorization: `Bearer ${token}` };
+  }
+
   async get<T = unknown>(path: string): Promise<T> {
-    const res = await this.doFetch(`${this.baseUrl}${path}`);
+    const res = await this.doFetch(`${this.baseUrl}${path}`, {
+      headers: await this.headers(),
+    });
     if (!res.ok) {
       throw new AppError({
         message: `Backend GET ${path} failed (${res.status})`,
@@ -37,7 +48,7 @@ export class BackendHttpClient {
   async post<T = unknown>(path: string, body?: unknown): Promise<T> {
     const res = await this.doFetch(`${this.baseUrl}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await this.headers({ 'Content-Type': 'application/json' }),
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {
@@ -58,7 +69,10 @@ export class BackendHttpClient {
   }
 
   async delete(path: string): Promise<void> {
-    const res = await this.doFetch(`${this.baseUrl}${path}`, { method: 'DELETE' });
+    const res = await this.doFetch(`${this.baseUrl}${path}`, {
+      method: 'DELETE',
+      headers: await this.headers(),
+    });
     if (!res.ok) {
       throw new AppError({
         message: `Backend DELETE ${path} failed (${res.status})`,
