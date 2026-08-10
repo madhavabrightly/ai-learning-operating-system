@@ -1,4 +1,5 @@
 import type { Result } from '@/errors/types';
+import type { RuntimeOrchestrator } from '@/runtime/scheduler/RuntimeOrchestrator';
 
 export interface StudyMetrics {
   totalStudyTimeMinutes: number;
@@ -32,6 +33,7 @@ export interface StudySession {
 }
 
 export interface IAnalyticsService {
+  attachOrchestrator(orchestrator: RuntimeOrchestrator): void;
   getStudyMetrics(): Promise<Result<StudyMetrics>>;
   getProcessingMetrics(): Promise<Result<ProcessingMetrics>>;
   getSessions(): Promise<Result<StudySession[]>>;
