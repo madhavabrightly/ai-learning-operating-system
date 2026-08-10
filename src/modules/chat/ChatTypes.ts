@@ -1,2 +1,44 @@
-import type { ChatMessage, Conversation, ChatSource } from '@//modules/chat/ChatService';
-export type { ChatMessage, Conversation, ChatSource };
+import type { Result } from '@/errors/types';
+
+// ---------------------------------------------------------------------------
+// Chat message, conversation, and persistence interfaces
+// ---------------------------------------------------------------------------
+
+export interface ChatSource {
+  sourceId: string;
+  url: string;
+  title: string;
+  domain: string;
+  retrievedAt: number;
+  relevantText: string;
+  confidence: number;
+  requestId: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  conversationId: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  createdAt: number;
+  status: 'sending' | 'streaming' | 'complete' | 'error';
+  documentId?: string;
+  sources?: ChatSource[];
+  error?: string;
+}
+
+export interface Conversation {
+  id: string;
+  title: string;
+  documentId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ChatPersistence {
+  saveConversation(conversation: Conversation): Promise<void>;
+  saveMessage(message: ChatMessage): Promise<void>;
+  listConversations(): Promise<Conversation[]>;
+  listMessages(conversationId: string): Promise<ChatMessage[]>;
+  deleteConversation(conversationId: string): Promise<void>;
+}

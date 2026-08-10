@@ -1,56 +1,43 @@
 import { AppError } from '@/errors/AppError';
 
-export type FailureTarget = 'parse' | 'concepts' | 'research' | 'ai';
-
-export interface FailureInjection {
-  enabled: boolean;
-  target: FailureTarget | null;
-  /** Times to fail before passing (0 = always fail). */
-  times: number;
-  message: string;
-  code: string;
-}
-
-const DEFAULT: FailureInjection = { enabled: false, target: null, times: 1, message: 'Injected failure', code: 'INJECTED_FAILURE' };
-
-/**
- * Developer-only failure injection. When enabled, the targeted real component
- * fails for `times` attempts with a transient error so the orchestrator's
- * retry/fallback path executes against REAL code — the failure actually
- * occurs in the selected component.
- */
 export class FailureInjector {
-  private state: FailureInjection = { ...DEFAULT };
+  private enabled = false;
+  private failureRates = new Map<string, number>();
 
-  isEnabled(target: FailureTarget): boolean {
-    return this.state.enabled && this.state.target === target;
+  /** Set failure rate (0–1) for a given worker type. */
+  setRate(workerType: string, rate: number): void {
+    this.failureRates.set(workerType, Math.max(0, Math.min(1, rate)));
   }
 
-  configure(injection: Partial<FailureInjection>): FailureInjection {
-    this.state = { ...DEFAULT, ...injection };
-    return { ...this.state };
+  /** Enable or disable failure injection entirely. */
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
   }
 
-  disable(): void {
-    this.state = { ...DEFAULT };
+  /** Toggle the enabled state. */
+  toggle(): boolean {
+    this.enabled = !this.enabled;
+    return this.enabled;
   }
 
-  snapshot(): FailureInjection {
-    return { ...this.state };
+  get isEnabled(): boolean {
+    return this.enabled;
   }
 
-  /** Returns an injected error if the target should fail right now. */
-  maybeFail(target: FailureTarget): AppError | null {
-    if (!this.isEnabled(target)) return null;
-    if (this.state.times <= 0) {
-      // Always fail.
-      return new AppError({ message: this.state.message, code: this.state.code, retryable: true, fallbackAvailable: true });
-    }
-    if (this.state.times > 0) {
-      this.state.times -= 1;
-      if (this.state.times === 0) this.state.enabled = false;
-      return new AppError({ message: this.state.message, code: this.state.code, retryable: true, fallbackAvailable: true });
-    }
-    return null;
+  get rates(): ReadonlyMap<string, number> {
+    return this.failureRates;
+  }
+
+  /** Returns an AppError to inject, or undefined if no failure should happen. */
+  maybeInject(workerType: string): AppError | undefined {
+    if (!this.enabled) return undefined;
+    const rate = this.failureRates.get(workerType) ?? 0;
+    if (rate <= 0 || Math.random() > rate) return undefined;
+    return new AppError({
+      message: `Injected failure for ${workerType}`,
+      code: 'INJECTED_FAILURE',
+      retryable: true,
+      fallbackAvailable: true,
+    });
   }
 }
