@@ -123,7 +123,7 @@ export function createContainer(): IContainer {
   const notesService = new NotesService(diskCache, eventBus);
   container.registerInstance(TOKENS.notesService, notesService);
 
-  const learningService = new LearningService(aiProvider, documentService, eventBus, logger.child('Learning'), diskCache);
+  const learningService = new LearningService(aiProvider, documentService, eventBus, logger.child('Learning'), diskCache, graphService);
   container.registerInstance(TOKENS.learningService, learningService);
 
   const researchService = new ResearchService(aiProvider, eventBus, logger.child('Research'), (url) => browserBridge.openExternal(url));

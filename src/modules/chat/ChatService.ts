@@ -413,22 +413,56 @@ export class ChatService implements IChatService {
     if (doc.tables.length > 0) grounding.tables = doc.tables.slice(0, 4).map((t) => ({ id: t.id, page: t.page, rows: t.rows.map((r) => r.map((c) => c.text)) }));
 
     // Inject graph nodes for the current document when available — lets the
-    // assistant reason over concept relationships, not just raw text.
+    // assistant reason over concept relationships, evidence and sources, not
+    // just raw text. Each concept carries description + evidence + sources +
+    // prerequisites + related (all index-backed lookups).
     if (this.deps.graph) {
       try {
         const graphResult = await this.deps.graph.load(documentId);
         if (graphResult.success && graphResult.data) {
           const g = graphResult.data;
           if (g.concepts.length > 0) {
+            const normalized = (selection ?? '').toLowerCase();
+            const focused = g.concepts
+              .filter((c) =>
+                normalized
+                  ? c.label.toLowerCase().includes(normalized) ||
+                    (c.aliases ?? []).some((a) => normalized.includes(a.toLowerCase()))
+                  : true,
+              )
+              .slice(0, 6);
+            const picked = focused.length > 0 ? focused : g.concepts.slice(0, 6);
+
+            const blocks: string[] = [];
+            for (const c of picked) {
+              const lines = [`- ${c.label}${c.description ? ` — ${c.description}` : ''}`];
+              if (c.evidence) lines.push(`  Evidence: "${c.evidence.slice(0, 240)}"`);
+              if (c.sources?.length) {
+                const pages = [
+                  ...new Set(
+                    c.sources
+                      .map((s) => s.page)
+                      .filter((p): p is number => typeof p === 'number' && p > 0),
+                  ),
+                ];
+                if (pages.length) lines.push(`  Sources: pages ${pages.join(', ')}`);
+              }
+              const [prereqResult, relatedResult] = await Promise.all([
+                this.deps.graph.getPrerequisites(c.id, { documentId, depth: 1 }),
+                this.deps.graph.getRelated(c.id, documentId),
+              ]);
+              if (prereqResult.success && prereqResult.data && prereqResult.data.length > 0) {
+                lines.push(`  Prerequisites: ${prereqResult.data.map((p) => p.label).join(', ')}`);
+              }
+              if (relatedResult.success && relatedResult.data && relatedResult.data.related.length > 0) {
+                lines.push(`  Related: ${relatedResult.data.related.map((r) => r.label).join(', ')}`);
+              }
+              blocks.push(lines.join('\n'));
+            }
+
             grounding.pages = [
               ...(grounding.pages ?? []),
-              {
-                page: 0,
-                text: `Key concepts in this document: ${g.concepts
-                  .slice(0, 12)
-                  .map((c) => `${c.label}${c.description ? ` — ${c.description.slice(0, 120)}` : ''}`)
-                  .join('; ')}`,
-              },
+              { page: 0, text: `Key concepts in this document:\n${blocks.join('\n')}` },
             ];
           }
         }

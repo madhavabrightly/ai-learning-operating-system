@@ -6,6 +6,7 @@ import type { DocumentService } from '@/modules/document/service/DocumentService
 import type { IEventBus } from '@/events/types';
 import type { ILogger } from '@/logging/ILogger';
 import type { ICache } from '@/cache/types';
+import type { IGraphService } from '@/modules/graph/types/GraphTypes';
 
 export type StudyContentKind = 'questions' | 'quiz' | 'flashcards';
 
@@ -38,6 +39,7 @@ export class LearningService {
     private readonly eventBus: IEventBus,
     private readonly logger: ILogger,
     private readonly _cache: ICache,
+    private readonly graph?: IGraphService,
   ) {}
 
   async generate(
@@ -56,8 +58,20 @@ export class LearningService {
         return err(new AppError({ message: 'This document has no extractable text yet.', code: 'EMPTY_DOCUMENT', retryable: false }));
       }
 
+      // Graph → Quiz/Study: when the knowledge graph is available, bias the
+      // material toward the document's weak/low-mastery concepts (with their
+      // evidence + prerequisites) so study content targets gaps, not noise.
+      const graphContext = await this.buildGraphContext(documentId);
+
       this.eventBus.publish('study.generating', { kind, documentId }, 'client');
-      const result = await this.provider.learn({ documentId, text, kind, count, difficulty });
+      const result = await this.provider.learn({
+        documentId,
+        text,
+        kind,
+        count,
+        difficulty,
+        ...(graphContext ? { graphContext } : {}),
+      });
 
       const items = validateStudyContent(kind, result, count);
       this.eventBus.publish('study.generated', { kind, documentId, count: items.length }, 'client');
@@ -67,6 +81,42 @@ export class LearningService {
       this.logger.error('Learning generation failed', { kind, documentId, error: error.message });
       // Surface the error — never silently return fabricated content.
       return err(error);
+    }
+  }
+
+  /**
+   * Build a compact graph-grounded context block for study generation:
+   * weak/low-mastery concepts first, each with description, evidence, and
+   * direct prerequisites (cycle-safe, index-backed). Never blocks generation
+   * when the graph is unavailable — it's an enhancement, not a dependency.
+   */
+  private async buildGraphContext(documentId: string): Promise<string | undefined> {
+    if (!this.graph) return undefined;
+    try {
+      const loaded = await this.graph.load(documentId);
+      if (!loaded.success || !loaded.data || loaded.data.concepts.length === 0) return undefined;
+
+      const weak = loaded.data.concepts
+        .filter((c) => (c.mastery ?? 0) < 0.5)
+        .sort((a, b) => (a.mastery ?? 0) - (b.mastery ?? 0))
+        .slice(0, 8);
+
+      const blocks: string[] = [];
+      for (const c of weak) {
+        const lines = [`- ${c.label}${c.description ? ` — ${c.description}` : ''}`];
+        if (c.evidence) lines.push(`  Evidence: "${c.evidence.slice(0, 200)}"`);
+        const prereq = await this.graph.getPrerequisites(c.id, { documentId, depth: 1 });
+        if (prereq.success && prereq.data && prereq.data.length > 0) {
+          lines.push(`  Prerequisites: ${prereq.data.map((p) => p.label).join(', ')}`);
+        }
+        blocks.push(lines.join('\n'));
+      }
+
+      if (blocks.length === 0) return undefined;
+      return `Focus on these weak concepts from the knowledge graph (mastery < 50%):\n${blocks.join('\n')}`;
+    } catch {
+      // Graph is optional — surface errors only from the AI generation.
+      return undefined;
     }
   }
 }

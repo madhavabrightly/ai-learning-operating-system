@@ -101,7 +101,15 @@ export interface AiProviderClient {
   action(request: ActionRequest): Promise<ChatResponse>;
   extractConcepts(documentId: string, text: string): Promise<unknown>;
   /** Generate learning content (questions/quiz/flashcards) from document text. */
-  learn(input: { documentId: string; text: string; kind: 'questions' | 'quiz' | 'flashcards'; count?: number; difficulty?: string }): Promise<unknown>;
+  learn(input: {
+    documentId: string;
+    text: string;
+    kind: 'questions' | 'quiz' | 'flashcards';
+    count?: number;
+    difficulty?: string;
+    /** Optional graph-grounded context: weak/low-mastery concepts to focus on. */
+    graphContext?: string;
+  }): Promise<unknown>;
   research(query: string, url?: string, maxResults?: number): Promise<ResearchResult>;
   health(): Promise<{ status: string; config: Record<string, unknown> }>;
 }
@@ -393,8 +401,9 @@ export function createAiProviderClient(_client?: unknown, fetchImpl?: typeof fet
     },
 
     async learn(input) {
-      const { documentId, text, kind, count, difficulty } = input;
+      const { documentId, text, kind, count, difficulty, graphContext } = input;
       const prompt = buildStructuredPrompt({ kind, text, count, difficulty });
+      const fullPrompt = graphContext ? `${prompt}\n\n${graphContext}` : prompt;
 
       const attempt = async (repair: boolean): Promise<string> => {
         const body: Record<string, unknown> = {
@@ -403,8 +412,8 @@ export function createAiProviderClient(_client?: unknown, fetchImpl?: typeof fet
             {
               role: 'user',
               content: repair
-                ? `${prompt}\n\nYour previous response was not valid JSON. Respond again with ONLY valid JSON, nothing else.`
-                : prompt,
+                ? `${fullPrompt}\n\nYour previous response was not valid JSON. Respond again with ONLY valid JSON, nothing else.`
+                : fullPrompt,
             },
           ],
           temperature: 0.2,
