@@ -141,3 +141,37 @@ export function buildStructuredPrompt(params: {
     .filter(Boolean)
     .join('\n');
 }
+
+/**
+ * Strict-JSON prompt for knowledge-graph extraction. The model returns ONLY a
+ * JSON object with `concepts` and `relationships` (source/target/type); the
+ * client parses, validates, and normalizes it into a KnowledgeGraph.
+ */
+export function buildGraphExtractionPrompt(params: {
+  text: string;
+  maxConcepts?: number;
+}): string {
+  const { text, maxConcepts = 20 } = params;
+  return [
+    'You are a knowledge-graph extraction engine for a study app.',
+    'Analyze the document text below and extract its key concepts and the relationships between them.',
+    'Return ONLY valid JSON (no markdown, no code fences, no commentary) in EXACTLY this shape:',
+    '{',
+    '  "concepts": [',
+    '    {"label": "Concept name", "description": "one-sentence explanation", "difficulty": "beginner|intermediate|advanced", "aliases": ["alt name"]}',
+    '  ],',
+    '  "relationships": [',
+    '    {"source": "Concept name", "target": "Other concept", "type": "prerequisite|related|part_of|leads_to", "evidence": "short verbatim quote"}',
+    '  ]',
+    '}',
+    `Extract between 6 and ${maxConcepts} concepts covering the document's main ideas.`,
+    'Use the exact same label string for a concept everywhere it appears.',
+    'relationship.type must be one of: prerequisite (this concept is needed first), related (associated), part_of (is a component of), leads_to (results in).',
+    'Only create relationships between concepts that actually appear in the text.',
+    'When possible, quote evidence verbatim from the text.',
+    '',
+    '--- Document text ---',
+    truncateTokens(text, 12000),
+    '--- End of document text ---',
+  ].join('\n');
+}

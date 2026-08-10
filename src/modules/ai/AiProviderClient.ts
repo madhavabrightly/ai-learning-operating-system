@@ -1,7 +1,7 @@
 import { AppError } from '@/errors/AppError';
 import { SUPABASE_URL, OPENROUTER_FUNCTION, OPENROUTER_DEFAULT_MODEL, AI_RETRY } from '@/constants/config';
 import { getAuthToken } from '@/services/authSession';
-import { buildChatPrompt, buildStructuredPrompt } from '@/modules/ai/promptBuilder';
+import { buildChatPrompt, buildStructuredPrompt, buildGraphExtractionPrompt } from '@/modules/ai/promptBuilder';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -100,6 +100,8 @@ export interface AiProviderClient {
   streamChat(request: ChatRequest, callbacks: StreamCallbacks): Promise<void>;
   action(request: ActionRequest): Promise<ChatResponse>;
   extractConcepts(documentId: string, text: string): Promise<unknown>;
+  /** Extract a knowledge graph (concepts + relationships) as strict JSON from document text. */
+  extractGraph(documentId: string, text: string): Promise<unknown>;
   /** Generate learning content (questions/quiz/flashcards) from document text. */
   learn(input: {
     documentId: string;
@@ -400,6 +402,64 @@ export function createAiProviderClient(_client?: unknown, fetchImpl?: typeof fet
       });
     },
 
+    async extractGraph(documentId, text) {
+      const prompt = buildGraphExtractionPrompt({ text, maxConcepts: 20 });
+
+      const attempt = async (repair: boolean): Promise<string> => {
+        const body: Record<string, unknown> = {
+          model: OPENROUTER_DEFAULT_MODEL,
+          messages: [
+            {
+              role: 'user',
+              content: repair
+                ? `${prompt}\n\nYour previous response was not valid JSON. Respond again with ONLY valid JSON, nothing else.`
+                : prompt,
+            },
+          ],
+          temperature: 0.2,
+          max_tokens: 2500,
+          stream: false,
+          // No format: 'json' — see learn() for why (free model rejects structured outputs).
+        };
+        return withRetry(async () => {
+          const res = await doFetch(baseUrl, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify(body),
+          });
+          if (!res.ok) throw await parseError(res);
+          const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+          return data.choices?.[0]?.message?.content ?? '';
+        });
+      };
+
+      const parse = (raw: string): unknown => {
+        const cleaned = raw
+          .trim()
+          .replace(/^```(?:json)?\s*/i, '')
+          .replace(/\s*```$/, '');
+        const start = cleaned.indexOf('{');
+        const end = cleaned.lastIndexOf('}');
+        if (start === -1 || end === -1 || end <= start) {
+          throw new AppError({ message: 'Model did not return a JSON object for the graph', code: 'JSON_PARSE_ERROR', retryable: false });
+        }
+        try {
+          return JSON.parse(cleaned.slice(start, end + 1)) as unknown;
+        } catch {
+          throw new AppError({ message: 'Model returned malformed JSON for the graph', code: 'JSON_PARSE_ERROR', retryable: false });
+        }
+      };
+
+      let raw = await attempt(false);
+      try {
+        return parse(raw);
+      } catch {
+        // One repair retry, then surface the error — no fabricated graph data.
+        raw = await attempt(true);
+        return parse(raw);
+      }
+    },
+
     async learn(input) {
       const { documentId, text, kind, count, difficulty, graphContext } = input;
       const prompt = buildStructuredPrompt({ kind, text, count, difficulty });
@@ -419,7 +479,11 @@ export function createAiProviderClient(_client?: unknown, fetchImpl?: typeof fet
           temperature: 0.2,
           max_tokens: 2000,
           stream: false,
-          format: 'json',
+          // NOTE: do NOT send format: 'json' — the edge function maps it to
+          // response_format.json_object, which inclusionai/ling-3.0-tiny
+          // rejects with 400 "model does not support feature: structured-outputs".
+          // The strict prompt + repair retry + client-side JSON validation below
+          // already guarantee a JSON array without relying on structured outputs.
         };
         return withRetry(async () => {
           const res = await doFetch(baseUrl, {

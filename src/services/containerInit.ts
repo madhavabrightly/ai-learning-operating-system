@@ -20,7 +20,7 @@ import { ChatService } from '@/modules/chat/ChatService';
 import type { ChatServiceDeps } from '@/modules/chat/ChatService';
 import { IndexedDbChatPersistence } from '@/modules/chat/IndexedDbChatPersistence';
 import { GraphService } from '@/modules/graph/service/GraphService';
-import { createBackendGraphExtractor } from '@/modules/graph/service/BackendGraphExtractor';
+import { createLlmGraphExtractor } from '@/modules/graph/service/LlmGraphExtractor';
 import { NotesService } from '@/modules/notes/service/NotesService';
 import { ResearchService } from '@/modules/research/ResearchService';
 import { LearningService } from '@/modules/learning/LearningService';
@@ -113,7 +113,7 @@ export function createContainer(): IContainer {
   const chatStore = createChatStore({ service: chatService, eventBus });
   container.registerInstance(TOKENS.chatStore, chatStore);
 
-  const graphExtractor = createBackendGraphExtractor(backendClient);
+  const graphExtractor = createLlmGraphExtractor({ provider: aiProvider, documents: documentService });
   const graphService = new GraphService(eventBus, logger.child('Graph'), documentService, { extractor: graphExtractor });
   container.registerInstance(TOKENS.graphService, graphService);
 

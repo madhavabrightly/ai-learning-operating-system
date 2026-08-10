@@ -85,6 +85,71 @@ export class LearningService {
   }
 
   /**
+   * Record a quiz result: answers the user got wrong are matched (by text
+   * overlap) against the knowledge graph's concepts, and their mastery is
+   * lowered so future study content and recommendations bias toward them.
+   * Returns the labels of the concepts now marked as weak.
+   *
+   * Graph is optional — if unavailable this is a safe no-op that returns [].
+   */
+  async recordQuizResult(
+    documentId: string,
+    results: Array<{ question: string; correct: boolean }>,
+  ): Promise<Result<string[]>> {
+    if (!this.graph || results.length === 0) {
+      return ok([]);
+    }
+
+    try {
+      const loaded = await this.graph.load(documentId);
+      if (!loaded.success || !loaded.data || loaded.data.concepts.length === 0) {
+        return ok([]);
+      }
+
+      const wrong = results.filter((r) => !r.correct);
+      if (wrong.length === 0) {
+        return ok([]);
+      }
+
+      const graph = loaded.data;
+      const weak: string[] = [];
+
+      // Normalize question text to single words for overlap matching.
+      const questionWords = wrong.map((r) =>
+        r.question
+          .toLowerCase()
+          .split(/[^a-z0-9]+/)
+          .filter((w) => w.length > 2),
+      );
+
+      const updated = graph.concepts.map((c) => {
+        const labelWords = c.label.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
+        const hit = questionWords.some((words) => labelWords.some((w) => words.includes(w)));
+        if (!hit) return c;
+
+        weak.push(c.label);
+        // Missed → push mastery down so the concept reads as weak.
+        const mastery = Math.min(c.mastery ?? 0, 0.35);
+        if (mastery === c.mastery) return c;
+        return { ...c, mastery };
+      });
+
+      if (weak.length > 0) {
+        this.graph.setGraph(documentId, { ...graph, concepts: updated });
+        this.eventBus.publish('graph.mastery_updated', { documentId, weakConcepts: weak }, 'client');
+        this.logger.info('Quiz result updated weak concepts', { documentId, weak: weak.length });
+      }
+
+      return ok(weak);
+    } catch (e) {
+      const error = AppError.from(e);
+      this.logger.error('Quiz result could not update weak concepts', { documentId, error: error.message });
+      // Never block the quiz flow on graph bookkeeping.
+      return ok([]);
+    }
+  }
+
+  /**
    * Build a compact graph-grounded context block for study generation:
    * weak/low-mastery concepts first, each with description, evidence, and
    * direct prerequisites (cycle-safe, index-backed). Never blocks generation
