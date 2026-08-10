@@ -5,6 +5,7 @@ import type { ILogger } from '@/logging/ILogger';
 import type { SessionEngine } from '@/modules/session/engine/SessionEngine';
 import type { SessionSnapshot } from '@/modules/session/types/SessionTypes';
 import type { DocumentStore } from '@/store/DocumentStore';
+import type { StoreApi, UseBoundStore } from 'zustand';
 
 export interface WorkspaceSessionManager {
   save(): Promise<Result<void>>;
@@ -13,7 +14,7 @@ export interface WorkspaceSessionManager {
 }
 
 export interface WorkspaceSessionManagerOptions {
-  documentStore: DocumentStore;
+  documentStore: UseBoundStore<StoreApi<DocumentStore>>;
   getNotes: () => Record<string, string>;
   getCurrentTab: () => string;
 }

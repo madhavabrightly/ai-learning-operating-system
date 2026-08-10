@@ -1,4 +1,3 @@
-```ts
 import { ok } from '@/errors/ResultFactory';
 import type { Result } from '@/errors/types';
 import type { IEventBus } from '@/events/types';
@@ -760,4 +759,3 @@ export class GraphService implements IGraphService {
     };
   }
 }
-```
