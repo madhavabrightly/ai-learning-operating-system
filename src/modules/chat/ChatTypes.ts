@@ -23,6 +23,8 @@ export interface ChatMessage {
   documentId?: string;
   sources?: ChatSource[];
   error?: string;
+  /** Reasoning/thinking tokens streamed by reasoning models (e.g. delta.reasoning). */
+  reasoning?: string;
 }
 
 export interface Conversation {
@@ -35,6 +37,7 @@ export interface Conversation {
 
 export interface ChatPersistence {
   saveConversation(conversation: Conversation): Promise<void>;
+  getConversation(conversationId: string): Promise<Conversation | undefined>;
   saveMessage(message: ChatMessage): Promise<void>;
   listConversations(): Promise<Conversation[]>;
   listMessages(conversationId: string): Promise<ChatMessage[]>;

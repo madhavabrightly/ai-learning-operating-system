@@ -15,6 +15,8 @@ export interface ChatState {
   error?: string;
   /** Live text of the in-flight streaming reply. */
   liveText: string;
+  /** Live reasoning/thinking tokens of the in-flight streaming reply. */
+  liveReasoning: string;
 }
 
 export interface ChatActions {
@@ -54,10 +56,11 @@ export function createChatStore({ service, eventBus, initial }: CreateChatStoreO
         streaming: false,
         sending: false,
         liveText: '',
+        liveReasoning: '',
         error: undefined,
       }));
     } else {
-      set((s) => ({ sending: false, streaming: false, liveText: '', error: result.error ?? 'Message failed' }));
+      set((s) => ({ sending: false, streaming: false, liveText: '', liveReasoning: '', error: result.error ?? 'Message failed' }));
     }
   };
 
@@ -69,6 +72,7 @@ export function createChatStore({ service, eventBus, initial }: CreateChatStoreO
     sending: false,
     error: undefined,
     liveText: '',
+    liveReasoning: '',
     ...initial,
 
     init: async () => {
@@ -80,7 +84,7 @@ export function createChatStore({ service, eventBus, initial }: CreateChatStoreO
 
     newConversation: async (documentId) => {
       const conv = await service.createConversation(documentId);
-      set({ activeConversationId: conv.id, messages: [], sources: [], error: undefined, liveText: '' });
+      set({ activeConversationId: conv.id, messages: [], sources: [], error: undefined, liveText: '', liveReasoning: '' });
     },
 
     selectConversation: async (conversationId) => {
@@ -90,6 +94,7 @@ export function createChatStore({ service, eventBus, initial }: CreateChatStoreO
         messages: result.success && result.data ? result.data : [],
         error: undefined,
         liveText: '',
+        liveReasoning: '',
       });
     },
 
@@ -103,6 +108,9 @@ export function createChatStore({ service, eventBus, initial }: CreateChatStoreO
         signal: abortController.signal,
         onDelta: (delta) => {
           set((s) => ({ liveText: s.liveText + delta }));
+        },
+        onReasoningDelta: (delta) => {
+          set((s) => ({ liveReasoning: s.liveReasoning + delta }));
         },
         onStatus: (status) => {
           set({ streaming: status === 'sending' || status === 'streaming' });
@@ -132,6 +140,9 @@ export function createChatStore({ service, eventBus, initial }: CreateChatStoreO
         onDelta: (delta) => {
           set((s) => ({ liveText: s.liveText + delta }));
         },
+        onReasoningDelta: (delta) => {
+          set((s) => ({ liveReasoning: s.liveReasoning + delta }));
+        },
         onStatus: (status) => {
           set({ streaming: status === 'sending' || status === 'streaming' });
         },
@@ -150,6 +161,9 @@ export function createChatStore({ service, eventBus, initial }: CreateChatStoreO
         onDelta: (delta) => {
           set((s) => ({ liveText: s.liveText + delta }));
         },
+        onReasoningDelta: (delta) => {
+          set((s) => ({ liveReasoning: s.liveReasoning + delta }));
+        },
         onStatus: (status) => {
           set({ streaming: status === 'sending' || status === 'streaming' });
         },
@@ -160,7 +174,7 @@ export function createChatStore({ service, eventBus, initial }: CreateChatStoreO
     stop: () => {
       abortController?.abort();
       abortController = undefined;
-      set({ streaming: false, sending: false });
+      set({ streaming: false, sending: false, liveReasoning: '' });
     },
 
     research: async (query, context) => {
@@ -181,10 +195,11 @@ export function createChatStore({ service, eventBus, initial }: CreateChatStoreO
           streaming: false,
           sending: false,
           liveText: '',
+          liveReasoning: '',
           error: undefined,
         });
       } else {
-        set({ sending: false, streaming: false, liveText: '', error: result.error ?? 'Research failed' });
+        set({ sending: false, streaming: false, liveText: '', liveReasoning: '', error: result.error ?? 'Research failed' });
       }
     },
 
@@ -196,6 +211,7 @@ export function createChatStore({ service, eventBus, initial }: CreateChatStoreO
         activeConversationId: state.activeConversationId === conversationId ? undefined : state.activeConversationId,
         messages: state.activeConversationId === conversationId ? [] : state.messages,
         liveText: '',
+        liveReasoning: '',
       });
     },
 

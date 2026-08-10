@@ -65,6 +65,8 @@ export interface ActionRequest {
 
 export interface StreamCallbacks {
   onDelta: (delta: string) => void;
+  /** Reasoning/thinking tokens from reasoning models (delta.reasoning / delta.reasoning_content). */
+  onReasoningDelta?: (delta: string) => void;
   onDone?: () => void;
   onError?: (error: AppError) => void;
   signal?: AbortSignal;
@@ -167,14 +169,40 @@ async function parseError(res: Response): Promise<AppError> {
   return new AppError({ message, code: 'AI_SERVICE_ERROR', retryable });
 }
 
-/** Parse an OpenRouter SSE frame into a content delta (or null for done). */
-function parseSseFrame(line: string): string | null {
+/** Parsed content from a single OpenRouter SSE delta frame. */
+interface SseDelta {
+  content: string;
+  reasoning: string;
+}
+
+/**
+ * Parse an OpenRouter SSE frame into content + reasoning deltas.
+ * Returns null for [DONE] or unparseable frames (stream end / error).
+ * Reasoning models (e.g. via Novita) stream their thinking in
+ * `delta.reasoning` (OpenRouter spec) or `delta.reasoning_content`
+ * (DeepSeek-style providers) with `delta.content` empty — both are captured
+ * so the UI can surface the thinking phase instead of a blank stream.
+ */
+function parseSseFrame(line: string): SseDelta | null {
   if (!line.startsWith('data:')) return null;
   const payload = line.slice(5).trim();
   if (!payload || payload === '[DONE]') return null;
   try {
-    const parsed = JSON.parse(payload) as { choices?: { delta?: { content?: string } }[] };
-    return parsed.choices?.[0]?.delta?.content ?? '';
+    const parsed = JSON.parse(payload) as {
+      choices?: { delta?: { content?: string; reasoning?: string; reasoning_content?: string } }[];
+    };
+    const delta = parsed.choices?.[0]?.delta;
+    if (!delta) return { content: '', reasoning: '' };
+    const reasoning =
+      typeof delta.reasoning === 'string'
+        ? delta.reasoning
+        : typeof delta.reasoning_content === 'string'
+          ? delta.reasoning_content
+          : '';
+    return {
+      content: typeof delta.content === 'string' ? delta.content : '',
+      reasoning,
+    };
   } catch {
     return null;
   }
@@ -205,7 +233,7 @@ export function createAiProviderClient(_client?: unknown, fetchImpl?: typeof fet
             model: OPENROUTER_DEFAULT_MODEL,
             messages: built,
             temperature: request.temperature ?? 0.3,
-            max_tokens: request.maxTokens ?? 1200,
+            max_tokens: request.maxTokens ?? 4000,
             stream: false,
           }),
         });
@@ -239,7 +267,7 @@ export function createAiProviderClient(_client?: unknown, fetchImpl?: typeof fet
               model: OPENROUTER_DEFAULT_MODEL,
               messages: built,
               temperature: request.temperature ?? 0.3,
-              max_tokens: request.maxTokens ?? 1200,
+              max_tokens: request.maxTokens ?? 4000,
               stream: true,
             }),
             signal: callbacks.signal,
@@ -289,18 +317,28 @@ export function createAiProviderClient(_client?: unknown, fetchImpl?: typeof fet
             buffer = frames.pop() ?? '';
             for (const frame of frames) {
               for (const line of frame.split('\n')) {
+                if (!line.startsWith('data:')) continue;
                 const delta = parseSseFrame(line);
                 if (delta === null) {
                   completed = true;
                   continue;
                 }
-                if (delta) callbacks.onDelta(delta);
+                if (delta.reasoning) callbacks.onReasoningDelta?.(delta.reasoning);
+                if (delta.content) callbacks.onDelta(delta.content);
               }
             }
           }
           if (buffer.trim()) {
-            const delta = parseSseFrame(buffer.trim());
-            if (delta) callbacks.onDelta(delta);
+            const line = buffer.trim();
+            if (line.startsWith('data:')) {
+              const delta = parseSseFrame(line);
+              if (delta === null) {
+                completed = true;
+              } else {
+                if (delta.reasoning) callbacks.onReasoningDelta?.(delta.reasoning);
+                if (delta.content) callbacks.onDelta(delta.content);
+              }
+            }
           }
           callbacks.onDone?.();
         } catch (e) {

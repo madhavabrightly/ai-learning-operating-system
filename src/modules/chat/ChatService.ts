@@ -23,6 +23,7 @@ export interface ChatServiceDeps {
 export interface SendMessageOptions {
   stream?: boolean;
   onDelta?: (delta: string) => void;
+  onReasoningDelta?: (delta: string) => void;
   onStatus?: (status: ChatMessage['status']) => void;
   signal?: AbortSignal;
 }
@@ -74,8 +75,7 @@ export class ChatService implements IChatService {
     try {
       if (!content.trim()) return err(new AppError({ message: 'Message is empty', code: 'VALIDATION_ERROR', retryable: false }));
 
-      const conversation = conversationId ? (await this.getConversation(conversationId)) : this.newConversation(context.documentId);
-      const effectiveConversation = conversation ?? this.newConversation(context.documentId);
+      const effectiveConversation = await this.resolveConversation(conversationId, context.documentId);
 
       const userMessage: ChatMessage = {
         id: uuid(),
@@ -112,8 +112,13 @@ export class ChatService implements IChatService {
 
       if (request.stream) {
         let full = '';
+        let reasoning = '';
         await this.deps.provider.streamChat(request, {
           signal: options.signal,
+          onReasoningDelta: (delta) => {
+            reasoning += delta;
+            options.onReasoningDelta?.(delta);
+          },
           onDelta: (delta) => {
             full += delta;
             assistantMessage.content = full;
@@ -122,6 +127,7 @@ export class ChatService implements IChatService {
           },
           onDone: async () => {
             assistantMessage.content = full;
+            assistantMessage.reasoning = reasoning || undefined;
             assistantMessage.status = 'complete';
             assistantMessage.sources = this.toSources(grounding);
             await this.deps.persistence.saveMessage(assistantMessage);
@@ -130,6 +136,7 @@ export class ChatService implements IChatService {
           },
           onError: async (error) => {
             assistantMessage.status = 'error';
+            assistantMessage.reasoning = reasoning || undefined;
             assistantMessage.error = error.message;
             assistantMessage.content = full || error.message;
             assistantMessage.sources = this.toSources(grounding);
@@ -159,8 +166,7 @@ export class ChatService implements IChatService {
     context: { documentId?: string; selection?: string },
   ): Promise<Result<ChatResult>> {
     try {
-      const conversation = await this.getConversation(conversationId);
-      const effective = conversation ?? this.newConversation(context.documentId);
+      const effective = await this.resolveConversation(conversationId, context.documentId);
       const grounding = await this.buildGroundingContext(context.documentId, context.selection);
 
       const userMessage: ChatMessage = {
@@ -265,8 +271,7 @@ export class ChatService implements IChatService {
     context: { documentId?: string; url?: string },
   ): Promise<Result<ChatResult>> {
     try {
-      const conversation = await this.getConversation(conversationId);
-      const effective = conversation ?? this.newConversation(context.documentId);
+      const effective = await this.resolveConversation(conversationId, context.documentId);
 
       const userMessage: ChatMessage = {
         id: uuid(),
@@ -347,9 +352,28 @@ export class ChatService implements IChatService {
     return ok(undefined);
   }
 
+  /**
+   * Resolve the conversation to attach a message to, persisting it so the
+   * thread survives reloads. Follow-ups reuse the existing conversation by id
+   * (direct IndexedDB lookup — not a list scan) so history never fragments
+   * into orphan threads.
+   */
+  private async resolveConversation(conversationId: string | undefined, documentId?: string): Promise<Conversation> {
+    if (conversationId) {
+      const existing = await this.getConversation(conversationId);
+      if (existing) {
+        existing.updatedAt = Date.now();
+        await this.deps.persistence.saveConversation(existing);
+        return existing;
+      }
+    }
+    const conversation = this.newConversation(documentId);
+    await this.deps.persistence.saveConversation(conversation);
+    return conversation;
+  }
+
   private async getConversation(conversationId: string): Promise<Conversation | undefined> {
-    const list = await this.deps.persistence.listConversations();
-    return list.find((c) => c.id === conversationId);
+    return this.deps.persistence.getConversation(conversationId);
   }
 
   private async loadForPrompt(conversationId: string): Promise<{ role: 'system' | 'user' | 'assistant'; content: string }[]> {

@@ -44,6 +44,18 @@ export class IndexedDbChatPersistence implements ChatPersistence {
     });
   }
 
+  async getConversation(conversationId: string): Promise<Conversation | undefined> {
+    return this.withDb(async (db) => {
+      const tx = db.transaction(CONVERSATIONS_STORE, 'readonly');
+      const store = tx.objectStore(CONVERSATIONS_STORE);
+      return new Promise<Conversation | undefined>((resolve, reject) => {
+        const request = store.get(conversationId);
+        request.onsuccess = () => resolve(request.result as Conversation | undefined);
+        request.onerror = () => reject(request.error);
+      });
+    });
+  }
+
   async saveMessage(message: ChatMessage): Promise<void> {
     await this.withDb(async (db) => {
       const tx = db.transaction(MESSAGES_STORE, 'readwrite');
