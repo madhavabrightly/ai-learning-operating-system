@@ -1,5 +1,5 @@
 import { AppError } from '@/errors/AppError';
-import { SUPABASE_URL, OPENROUTER_FUNCTION, OPENROUTER_DEFAULT_MODEL, AI_RETRY } from '@/constants/config';
+import { SUPABASE_URL, OPENROUTER_FUNCTION, OPENROUTER_DEFAULT_MODEL, OPENROUTER_STRUCTURED_MODEL, AI_RETRY } from '@/constants/config';
 import { getAuthToken } from '@/services/authSession';
 import { buildChatPrompt, buildStructuredPrompt, buildGraphExtractionPrompt } from '@/modules/ai/promptBuilder';
 
@@ -407,7 +407,7 @@ export function createAiProviderClient(_client?: unknown, fetchImpl?: typeof fet
 
       const attempt = async (repair: boolean): Promise<string> => {
         const body: Record<string, unknown> = {
-          model: OPENROUTER_DEFAULT_MODEL,
+          model: OPENROUTER_STRUCTURED_MODEL,
           messages: [
             {
               role: 'user',
@@ -417,9 +417,13 @@ export function createAiProviderClient(_client?: unknown, fetchImpl?: typeof fet
             },
           ],
           temperature: 0.2,
-          max_tokens: 2500,
+          max_tokens: 3000,
           stream: false,
-          // No format: 'json' — see learn() for why (free model rejects structured outputs).
+          // gemma-4-26b advertises response_format + structured_outputs on
+          // OpenRouter, so JSON mode is supported here (unlike ling-3.0-tiny,
+          // which rejects response_format with a 400). Guarantees a valid JSON
+          // object so the client-side parse below rarely needs the repair retry.
+          format: 'json',
         };
         return withRetry(async () => {
           const res = await doFetch(baseUrl, {
@@ -467,7 +471,7 @@ export function createAiProviderClient(_client?: unknown, fetchImpl?: typeof fet
 
       const attempt = async (repair: boolean): Promise<string> => {
         const body: Record<string, unknown> = {
-          model: OPENROUTER_DEFAULT_MODEL,
+          model: OPENROUTER_STRUCTURED_MODEL,
           messages: [
             {
               role: 'user',
@@ -477,13 +481,15 @@ export function createAiProviderClient(_client?: unknown, fetchImpl?: typeof fet
             },
           ],
           temperature: 0.2,
-          max_tokens: 2000,
+          max_tokens: 3000,
           stream: false,
-          // NOTE: do NOT send format: 'json' — the edge function maps it to
-          // response_format.json_object, which inclusionai/ling-3.0-tiny
-          // rejects with 400 "model does not support feature: structured-outputs".
-          // The strict prompt + repair retry + client-side JSON validation below
-          // already guarantee a JSON array without relying on structured outputs.
+          // NOTE: do NOT send format: 'json' here. The edge function maps it
+          // to response_format.json_object, which guarantees a JSON *object* —
+          // but learn() needs a JSON *array*, and json_object mode on some
+          // endpoints rejects or mangles bare arrays. The strict prompt +
+          // repair retry + client-side validation below already guarantee a
+          // JSON array. (extractGraph uses format: 'json' because its output
+          // is a JSON object — see above.)
         };
         return withRetry(async () => {
           const res = await doFetch(baseUrl, {

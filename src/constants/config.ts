@@ -23,6 +23,18 @@ export const OPENROUTER_FUNCTION = 'openrouter-chat';
 /** Default OpenRouter model — free, 1.3B active params, 262k context. */
 export const OPENROUTER_DEFAULT_MODEL = import.meta.env.VITE_OPENROUTER_MODEL ?? 'inclusionai/ling-3.0-tiny:free';
 
+/**
+ * Model used for structured JSON tasks (quiz/flashcards/questions and
+ * knowledge-graph extraction). MUST be a capable instruction-tuned model that
+ * does NOT burn its token budget on reasoning: the default chat model
+ * (ling-3.0-tiny) is a reasoning model that spends its entire max_tokens on
+ * "thinking" for complex prompts and returns empty content. Gemma 4 26B A4B
+ * advertises response_format + structured_outputs on OpenRouter, so the
+ * edge function's format:'json' → response_format mapping works with it.
+ */
+export const OPENROUTER_STRUCTURED_MODEL =
+  import.meta.env.VITE_OPENROUTER_STRUCTURED_MODEL ?? 'google/gemma-4-26b-a4b-it:free';
+
 /** Max chat context budget (in approximate tokens). */
 export const CONTEXT_BUDGET = {
   SYSTEM_PROMPT: 500,
