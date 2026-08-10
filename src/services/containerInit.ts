@@ -145,7 +145,11 @@ export function createContainer(): IContainer {
   // --- Runtime orchestrator with REAL workers ------------------------------
   const orchestrator = new RuntimeOrchestrator(container, eventBus, logger.child('Orchestrator'), diskCache, performanceTimer);
   container.registerInstance(TOKENS.orchestrator, orchestrator);
-  analyticsService.attachOrchestrator(orchestrator);
+  if (typeof analyticsService.attachOrchestrator === 'function') {
+    analyticsService.attachOrchestrator(orchestrator);
+  } else {
+    logger.warn('AnalyticsService.attachOrchestrator unavailable — telemetry wiring skipped');
+  }
 
   orchestrator.registerWorker(createParseWorker(documentService, failureInjector));
   orchestrator.registerWorker(createConceptWorker({

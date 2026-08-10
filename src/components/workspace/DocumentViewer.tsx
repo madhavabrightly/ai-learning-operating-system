@@ -16,14 +16,15 @@ export interface DocumentViewerProps {
  */
 export function DocumentViewer({ document, page, zoom, onPageChange, onSelectText }: DocumentViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const currentPage = document.pages[page - 1];
-  const totalPages = document.metadata.pageCount || document.pages.length;
+  const pages = document.pages ?? [];
+  const currentPage = pages[page - 1];
+  const totalPages = document.metadata?.pageCount || pages.length;
 
   const blocksByPage = useMemo(() => {
     const map = new Map<number, DocumentBlock[]>();
-    for (const p of document.pages) map.set(p.index, p.blocks);
+    for (const p of pages) map.set(p.index, p.blocks);
     return map;
-  }, [document]);
+  }, [pages]);
 
   const handleSelect = () => {
     const selection = window.getSelection()?.toString().trim();
@@ -132,7 +133,7 @@ function BlockRenderer({ block, document, pageIndex }: { block: DocumentBlock; d
     case 'caption':
       return <p className="text-xs text-muted-foreground">{block.text}</p>;
     case 'formula': {
-      const formula = block.formulaId ? document.formulas.find((f) => f.id === block.formulaId) : undefined;
+      const formula = block.formulaId ? document.formulas?.find((f) => f.id === block.formulaId) : undefined;
       if (!formula) return <p className="text-sm text-muted-foreground">[formula]</p>;
       return (
         <div className="rounded border border-border/60 bg-muted/20 px-3 py-2">
@@ -142,7 +143,7 @@ function BlockRenderer({ block, document, pageIndex }: { block: DocumentBlock; d
       );
     }
     case 'table': {
-      const table = block.tableId ? document.tables.find((t) => t.id === block.tableId) : document.tables.find((t) => t.page === pageIndex);
+      const table = block.tableId ? document.tables?.find((t) => t.id === block.tableId) : document.tables?.find((t) => t.page === pageIndex);
       if (!table) return <p className="text-sm text-muted-foreground">[table]</p>;
       return (
         <div className="overflow-x-auto rounded border border-border">
@@ -178,8 +179,8 @@ function BlockRenderer({ block, document, pageIndex }: { block: DocumentBlock; d
       );
     }
     case 'figure': {
-      const figure = block.figureId ? document.figures.find((f) => f.id === block.figureId) : undefined;
-      const anyFigure = document.figures.find((f) => f.page === pageIndex);
+      const figure = block.figureId ? document.figures?.find((f) => f.id === block.figureId) : undefined;
+      const anyFigure = document.figures?.find((f) => f.page === pageIndex);
       const fig = figure ?? anyFigure;
       if (!fig) return <p className="text-sm text-muted-foreground">[figure]</p>;
       return (

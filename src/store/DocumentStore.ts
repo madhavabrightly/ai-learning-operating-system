@@ -2,9 +2,10 @@ import { create } from 'zustand';
 import type { IEventBus } from '@/events/types';
 import { EventTopics } from '@/events/EventTopics';
 import type { IDocumentService } from '@/modules/document/types/DocumentTypes';
-import type { DocumentReference, DocumentPage, DocumentStructure, DocumentQuality, DocumentSelection } from '@/modules/document/types/DocumentTypes';
+import type { DocumentReference, DocumentPage as ServiceDocumentPage, DocumentStructure, DocumentQuality, DocumentSelection } from '@/modules/document/types/DocumentTypes';
 import type { ParsedDocument } from '@/modules/document/model/DocumentModel';
 import type { WorkspaceContextState } from '@/modules/workspace/types/WorkspaceTypes';
+import { createEmptyProcessingRecord } from '@/modules/document/model/DocumentModel';
 
 export interface WebPageSource {
   url: string;
@@ -16,7 +17,7 @@ export interface DocumentState {
   documents: DocumentReference[];
   currentDocumentId?: string;
   currentDocument?: ParsedDocument;
-  pages: DocumentPage[];
+  pages: ServiceDocumentPage[];
   structure?: DocumentStructure;
   quality?: DocumentQuality;
   page: number;
@@ -92,12 +93,15 @@ export function createDocumentStore({ service, eventBus, initial }: CreateDocume
         service.getStructure(documentId),
         service.getQuality(documentId),
       ]);
+      const pages = pagesResult.success && pagesResult.data ? pagesResult.data : [];
+      const structure = structureResult.success && structureResult.data ? structureResult.data : undefined;
+      const quality = qualityResult.success && qualityResult.data ? qualityResult.data : undefined;
       set({
         currentDocumentId: documentId,
-        currentDocument: refResult.data as unknown as ParsedDocument,
-        pages: pagesResult.success && pagesResult.data ? pagesResult.data : [],
-        structure: structureResult.success && structureResult.data ? structureResult.data : undefined,
-        quality: qualityResult.success && qualityResult.data ? qualityResult.data : undefined,
+        currentDocument: toParsedDocument(refResult.data, pages, structure, quality),
+        pages,
+        structure,
+        quality,
         page: 1,
         loading: false,
       });
@@ -150,7 +154,7 @@ export function createDocumentStore({ service, eventBus, initial }: CreateDocume
       const state = get();
       const documentId = state.currentDocumentId ?? `doc-web-${Date.now()}`;
       const nextIndex = state.pages.length + 1;
-      const page: DocumentPage = {
+      const page: ServiceDocumentPage = {
         index: nextIndex,
         text: `Source: ${source.url}\nTitle: ${source.title}\n\n${source.text}`,
         blocks: [
@@ -160,9 +164,10 @@ export function createDocumentStore({ service, eventBus, initial }: CreateDocume
       };
 
       let documents = state.documents;
+      let ref: DocumentReference;
       const exists = documents.some((d) => d.id === documentId);
       if (!exists) {
-        const ref: DocumentReference = {
+        ref = {
           id: documentId,
           title: `Web: ${source.title}`,
           source: source.url,
@@ -170,12 +175,16 @@ export function createDocumentStore({ service, eventBus, initial }: CreateDocume
           uploadedAt: Date.now(),
         };
         documents = [...documents, ref];
+      } else {
+        ref = documents.find((d) => d.id === documentId) as DocumentReference;
       }
 
+      const pages = [...state.pages, page];
       set({
         documents,
         currentDocumentId: documentId,
-        pages: [...state.pages, page],
+        currentDocument: toParsedDocument(ref, pages, undefined, undefined),
+        pages,
         page: nextIndex,
       });
       eventBus.publish(EventTopics.DOCUMENT_OPENED, { documentId, title: source.title, source: source.url }, 'client');
@@ -183,4 +192,95 @@ export function createDocumentStore({ service, eventBus, initial }: CreateDocume
 
     clearError: () => set({ error: undefined }),
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Build a well-formed ParsedDocument from the service-layer pieces so the
+// UI (DocumentViewer etc.) never sees a Partial<ParsedDocument> with
+// undefined pages / formulas / tables / figures.
+// ---------------------------------------------------------------------------
+function toParsedDocument(
+  ref: DocumentReference,
+  pages: ServiceDocumentPage[],
+  structure: DocumentStructure | undefined,
+  quality: DocumentQuality | undefined,
+): ParsedDocument {
+  const modelPages: ParsedDocument['pages'] = pages.map((p) => ({
+    index: p.index,
+    text: p.text ?? '',
+    blocks: (p.blocks ?? []).map((b, i) => ({
+      id: `b-${p.index}-${i}`,
+      type: b.type === 'image' ? ('figure' as const) : (b.type as ParsedDocument['pages'][number]['blocks'][number]['type']),
+      text: b.text,
+      source: {
+        page: p.index,
+        bbox: b.x !== undefined ? { x: b.x, y: b.y, width: b.width, height: b.height } : undefined,
+        confidence: b.confidence,
+      },
+    })),
+    blockIds: [],
+    needsOcr: !p.text && (p.blocks ?? []).length === 0,
+  }));
+  const ocrRequired = modelPages.some((p) => p.needsOcr);
+  const formatName = (ref.mimeType ?? '').toLowerCase();
+  const format: ParsedDocument['metadata']['format'] = formatName.includes('pdf')
+    ? 'pdf'
+    : formatName.includes('html')
+      ? 'html'
+      : formatName.startsWith('text/')
+        ? 'txt'
+        : formatName.includes('docx')
+          ? 'docx'
+          : 'unknown';
+  return {
+    id: ref.id,
+    title: ref.title,
+    metadata: {
+      format,
+      title: ref.title,
+      pageCount: ref.pageCount ?? pages.length,
+      wordCount: pages.reduce((s, p) => s + (p.text?.split(/\s+/).filter(Boolean).length ?? 0), 0),
+      contentHash: '',
+      sizeBytes: 0,
+      parserEngine: 'aios',
+      requiresOcr: ocrRequired,
+      ocrStatus: ocrRequired ? 'required' : 'not_required',
+    },
+    pages: modelPages,
+    sections: [],
+    formulas: (structure?.formulas ?? []).map((f) => ({
+      id: f.id,
+      page: f.page,
+      tex: f.tex,
+      inline: f.inline,
+      confidence: f.confidence,
+      source: f.bbox ? { page: f.page, bbox: f.bbox } : { page: f.page },
+    })),
+    tables: (structure?.tables ?? []).map((t) => ({
+      id: t.id,
+      page: t.page,
+      caption: undefined,
+      headers: t.rows.length > 0 ? t.rows[0] : [],
+      rows: t.rows.slice(1).map((row) => row.map((cell) => ({ text: cell }))),
+      reduced: false,
+      confidence: t.confidence,
+      bbox: t.bbox,
+      source: { page: t.page, bbox: t.bbox },
+    })),
+    figures: (structure?.figures ?? []).map((f) => ({
+      id: f.id,
+      page: f.page,
+      caption: f.caption,
+      confidence: f.confidence,
+      bbox: f.bbox,
+      imageUrl: undefined,
+      hasImage: false,
+      source: { page: f.page, bbox: f.bbox },
+    })),
+    citations: [],
+    index: [],
+    status: quality ? 'READY' : 'PROCESSING',
+    processing: createEmptyProcessingRecord(ref.id),
+    createdAt: ref.uploadedAt ?? Date.now(),
+  } as ParsedDocument;
 }
