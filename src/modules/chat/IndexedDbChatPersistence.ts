@@ -79,6 +79,17 @@ export class IndexedDbChatPersistence implements ChatPersistence {
     });
   }
 
+  async deleteMessage(messageId: string): Promise<void> {
+    await this.withDb(async (db) => {
+      const tx = db.transaction(MESSAGES_STORE, 'readwrite');
+      tx.objectStore(MESSAGES_STORE).delete(messageId);
+      await new Promise<void>((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    });
+  }
+
   async deleteConversation(conversationId: string): Promise<void> {
     await this.withDb(async (db) => {
       const tx = db.transaction([CONVERSATIONS_STORE, MESSAGES_STORE], 'readwrite');

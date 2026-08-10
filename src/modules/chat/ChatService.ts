@@ -5,10 +5,11 @@ import { AppError } from '@/errors/AppError';
 import { EventTopics } from '@/events/EventTopics';
 import type { IEventBus } from '@/events/types';
 import type { ILogger } from '@/logging/ILogger';
-import type { AiProviderClient, GroundingContext, AiActionIntent } from '@/modules/ai/AiProviderClient';
+import type { AiProviderClient, GroundingContext, AiActionIntent, GroundedSource } from '@/modules/ai/AiProviderClient';
 import type { DocumentService } from '@/modules/document/service/DocumentService';
 import { retrieveChunks } from '@/modules/document/retrieval/retrieval';
-import type { ChatMessage, ChatPersistence, Conversation } from './ChatTypes';
+import type { IGraphService } from '@/modules/graph/types/GraphTypes';
+import type { ChatMessage, ChatPersistence, Conversation, ChatSource } from './ChatTypes';
 
 export interface ChatServiceDeps {
   provider: AiProviderClient;
@@ -16,6 +17,7 @@ export interface ChatServiceDeps {
   persistence: ChatPersistence;
   eventBus: IEventBus;
   logger: ILogger;
+  graph?: IGraphService;
 }
 
 export interface SendMessageOptions {
@@ -28,12 +30,14 @@ export interface SendMessageOptions {
 export interface ChatResult {
   message: ChatMessage;
   conversation: Conversation;
-  sources?: ChatMessage['sources'];
+  sources?: ChatSource[];
 }
 
 export interface IChatService {
   sendMessage(conversationId: string | undefined, content: string, context: { documentId?: string; selection?: string }, options?: SendMessageOptions): Promise<Result<ChatResult>>;
   runAction(conversationId: string, intent: AiActionIntent, context: { documentId?: string; selection?: string }): Promise<Result<ChatResult>>;
+  regenerate(conversationId: string, context: { documentId?: string; selection?: string }, options?: SendMessageOptions): Promise<Result<ChatResult>>;
+  followUp(conversationId: string, context: { documentId?: string; selection?: string }, options?: SendMessageOptions): Promise<Result<ChatResult>>;
   research(conversationId: string, query: string, context: { documentId?: string; url?: string }): Promise<Result<ChatResult>>;
   listConversations(): Promise<Result<Conversation[]>>;
   loadConversation(conversationId: string): Promise<Result<ChatMessage[]>>;
@@ -42,8 +46,9 @@ export interface IChatService {
 }
 
 /**
- * Real chat service. Builds grounded context from the actual document,
- * streams responses from the backend AI provider, persists every message.
+ * Real chat service. Builds a budgeted, grounded prompt from the actual
+ * document, streams responses from the Edge Function (OpenRouter), attaches
+ * numbered sources for provenance, and persists every message.
  */
 export class ChatService implements IChatService {
   constructor(private readonly deps: ChatServiceDeps) {}
@@ -118,6 +123,7 @@ export class ChatService implements IChatService {
           onDone: async () => {
             assistantMessage.content = full;
             assistantMessage.status = 'complete';
+            assistantMessage.sources = this.toSources(grounding);
             await this.deps.persistence.saveMessage(assistantMessage);
             options.onStatus?.('complete');
             this.publish(EventTopics.ASSISTANT_RESPONSE, { conversationId: effectiveConversation.id, message: assistantMessage });
@@ -126,6 +132,7 @@ export class ChatService implements IChatService {
             assistantMessage.status = 'error';
             assistantMessage.error = error.message;
             assistantMessage.content = full || error.message;
+            assistantMessage.sources = this.toSources(grounding);
             await this.deps.persistence.saveMessage(assistantMessage);
             options.onStatus?.('error');
           },
@@ -134,6 +141,7 @@ export class ChatService implements IChatService {
         const response = await this.deps.provider.chat(request);
         assistantMessage.content = response.content;
         assistantMessage.status = 'complete';
+        assistantMessage.sources = this.toSources(grounding);
         await this.deps.persistence.saveMessage(assistantMessage);
         options.onStatus?.('complete');
       }
@@ -180,13 +188,75 @@ export class ChatService implements IChatService {
         createdAt: Date.now(),
         status: 'complete',
         documentId: context.documentId,
+        sources: this.toSources(grounding),
       };
       await this.deps.persistence.saveMessage(assistantMessage);
-      this.publish(EventTopics.ASSISTANT_RESPONSE, { conversationId: effective.id, message: assistantMessage });
-      return ok({ message: assistantMessage, conversation: effective });
+      this.publish(EventTopics.ASSISTANT_RESPONSE, { conversationId: effective.id, message: assistantMessage, sources: assistantMessage.sources });
+      return ok({ message: assistantMessage, conversation: effective, sources: assistantMessage.sources });
     } catch (e) {
       return err(AppError.from(e));
     }
+  }
+
+  /**
+   * Regenerate: drop the last assistant reply (and any trailing user/error
+   * placeholders) and re-run the AI against the last real user message.
+   */
+  async regenerate(
+    conversationId: string,
+    context: { documentId?: string; selection?: string },
+    options: SendMessageOptions = {},
+  ): Promise<Result<ChatResult>> {
+    try {
+      const conversation = await this.getConversation(conversationId);
+      if (!conversation) return err(new AppError({ message: 'Conversation not found', code: 'NOT_FOUND', retryable: false }));
+
+      const messages = await this.deps.persistence.listMessages(conversationId);
+      // Find the last complete user message; drop everything after it.
+      let lastUserIndex = -1;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === 'user' && messages[i].status === 'complete') {
+          lastUserIndex = i;
+          break;
+        }
+      }
+      if (lastUserIndex === -1) {
+        return err(new AppError({ message: 'No user message to regenerate', code: 'VALIDATION_ERROR', retryable: false }));
+      }
+
+      const lastUser = messages[lastUserIndex];
+      for (const m of messages.slice(lastUserIndex + 1)) {
+        await this.deps.persistence.deleteMessage(m.id);
+      }
+
+      return this.sendMessage(
+        conversationId,
+        lastUser.content,
+        { documentId: lastUser.documentId ?? context.documentId, selection: context.selection },
+        options,
+      );
+    } catch (e) {
+      return err(AppError.from(e));
+    }
+  }
+
+  /** Follow-up: ask the AI to propose follow-up questions about the last reply. */
+  async followUp(
+    conversationId: string,
+    context: { documentId?: string; selection?: string },
+    options: SendMessageOptions = {},
+  ): Promise<Result<ChatResult>> {
+    const conversation = await this.getConversation(conversationId);
+    if (!conversation) return err(new AppError({ message: 'Conversation not found', code: 'NOT_FOUND', retryable: false }));
+    const messages = await this.deps.persistence.listMessages(conversationId);
+    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant' && m.status === 'complete');
+    const base = lastAssistant?.content ?? context.selection ?? '';
+    return this.sendMessage(
+      conversationId,
+      `Suggest 3 focused follow-up questions about the topic we just discussed. Base them strictly on the source material.\n\nLast reply:\n${base.slice(0, 1500)}`,
+      { documentId: context.documentId, selection: context.selection },
+      options,
+    );
   }
 
   async research(
@@ -209,61 +279,51 @@ export class ChatService implements IChatService {
       };
       await this.deps.persistence.saveMessage(userMessage);
 
-      const researchQuery = query.trim() || (context.url ?? '');
-      const researchResult = await this.deps.provider.research(researchQuery, context.url);
-
-      if (researchResult.mechanism === 'error' || researchResult.error) {
-        const message = researchResult.error?.message ?? 'Research failed';
-        const assistantMessage: ChatMessage = {
+      let assistantMessage: ChatMessage;
+      try {
+        const researchResult = await this.deps.provider.research(query.trim() || (context.url ?? ''), context.url);
+        if (researchResult.mechanism === 'error' || researchResult.error) {
+          throw new AppError({ message: researchResult.error?.message ?? 'Research failed', code: 'RESEARCH_ERROR', retryable: false });
+        }
+        // Ground the answer in the actual evidence: feed sources to the AI.
+        const sources = researchResult.evidence;
+        const grounding: GroundingContext = {
+          documentId: context.documentId,
+          sources: sources.map((s) => ({ url: s.url, title: s.title, text: s.relevantText, retrievedAt: s.retrievedAt })),
+          retrievedAt: Date.now(),
+        };
+        const answerRequest = {
+          conversationId: effective.id,
+          messages: [
+            { role: 'user' as const, content: `Summarize the research findings for: ${query}. Cite sources inline like [1], [2].` },
+          ],
+          context: grounding,
+          stream: false,
+        };
+        const ai = await this.deps.provider.chat(answerRequest);
+        assistantMessage = {
           id: uuid(),
           conversationId: effective.id,
           role: 'assistant',
-          content: `I couldn't complete the research: ${message}`,
+          content: ai.content,
+          createdAt: Date.now(),
+          status: 'complete',
+          documentId: context.documentId,
+          sources: sources.map((s) => ({ ...s })),
+        };
+      } catch (e) {
+        const error = AppError.from(e);
+        assistantMessage = {
+          id: uuid(),
+          conversationId: effective.id,
+          role: 'assistant',
+          content: `I couldn't complete the research: ${error.message}`,
           createdAt: Date.now(),
           status: 'error',
-          error: message,
+          error: error.message,
           documentId: context.documentId,
         };
-        await this.deps.persistence.saveMessage(assistantMessage);
-        return ok({ message: assistantMessage, conversation: effective });
       }
-
-      // Ground the answer in the actual evidence: feed sources to the AI.
-      const sources = researchResult.evidence;
-      const grounding: GroundingContext = {
-        documentId: context.documentId,
-        sources: sources.map((s) => ({ url: s.url, title: s.title, text: s.relevantText, retrievedAt: s.retrievedAt })),
-        retrievedAt: Date.now(),
-      };
-
-      const answerRequest = {
-        conversationId: effective.id,
-        messages: [
-          { role: 'user' as const, content: `Summarize the research findings for: ${query}. Cite sources inline like [1], [2].` },
-        ],
-        context: grounding,
-        stream: false,
-      };
-
-      let answerText: string;
-      try {
-        const ai = await this.deps.provider.chat(answerRequest);
-        answerText = ai.content;
-      } catch {
-        // AI unavailable — still return the evidence so research is never faked.
-        answerText = sources.map((s, i) => `[${i + 1}] ${s.title} — ${s.url}\n${s.relevantText.slice(0, 800)}`).join('\n\n');
-      }
-
-      const assistantMessage: ChatMessage = {
-        id: uuid(),
-        conversationId: effective.id,
-        role: 'assistant',
-        content: answerText,
-        createdAt: Date.now(),
-        status: 'complete',
-        documentId: context.documentId,
-        sources: sources.map((s) => ({ ...s, sourceId: s.sourceId })),
-      };
       await this.deps.persistence.saveMessage(assistantMessage);
       this.publish(EventTopics.ASSISTANT_RESPONSE, { conversationId: effective.id, message: assistantMessage, sources: assistantMessage.sources });
       return ok({ message: assistantMessage, conversation: effective, sources: assistantMessage.sources });
@@ -294,13 +354,14 @@ export class ChatService implements IChatService {
 
   private async loadForPrompt(conversationId: string): Promise<{ role: 'system' | 'user' | 'assistant'; content: string }[]> {
     const messages = await this.deps.persistence.listMessages(conversationId);
-    // Exclude streaming/error placeholders; keep last 16 real messages.
+    // Exclude streaming/error placeholders; the prompt builder keeps the last
+    // 6 complete rounds to respect the context budget.
     return messages
       .filter((m) => m.status === 'complete' && m.content.trim())
-      .slice(-16)
       .map((m) => ({ role: m.role === 'user' ? ('user' as const) : ('assistant' as const), content: m.content }));
   }
 
+  /** Build grounded context + inject graph concepts for provenance. */
   private async buildGroundingContext(documentId?: string, selection?: string): Promise<GroundingContext | undefined> {
     if (!documentId) {
       return selection ? { selection } : undefined;
@@ -312,12 +373,13 @@ export class ChatService implements IChatService {
     const doc = docResult.data;
     const queryText = selection ?? doc.title;
 
-    const chunks = retrieveChunks(doc, queryText, 4, 1500);
+    const chunks = retrieveChunks(doc, queryText, 6, 1800);
     const grounding: GroundingContext = {
       documentId,
       documentTitle: doc.title,
       pages: chunks.map((c) => ({ page: c.page, text: c.text })),
       selection,
+      retrievedAt: Date.now(),
     };
     const sections = chunks
       .map((c) => (c.sectionTitle ? { title: c.sectionTitle, text: c.text, page: c.page } : undefined))
@@ -325,10 +387,76 @@ export class ChatService implements IChatService {
     if (sections.length > 0) grounding.sections = sections;
     if (doc.formulas.length > 0) grounding.formulas = doc.formulas.slice(0, 8).map((f) => ({ id: f.id, tex: f.tex, page: f.page }));
     if (doc.tables.length > 0) grounding.tables = doc.tables.slice(0, 4).map((t) => ({ id: t.id, page: t.page, rows: t.rows.map((r) => r.map((c) => c.text)) }));
+
+    // Inject graph nodes for the current document when available — lets the
+    // assistant reason over concept relationships, not just raw text.
+    if (this.deps.graph) {
+      try {
+        const graphResult = await this.deps.graph.load(documentId);
+        if (graphResult.success && graphResult.data) {
+          const g = graphResult.data;
+          if (g.concepts.length > 0) {
+            grounding.pages = [
+              ...(grounding.pages ?? []),
+              {
+                page: 0,
+                text: `Key concepts in this document: ${g.concepts
+                  .slice(0, 12)
+                  .map((c) => `${c.label}${c.description ? ` — ${c.description.slice(0, 120)}` : ''}`)
+                  .join('; ')}`,
+              },
+            ];
+          }
+        }
+      } catch {
+        // Graph is optional — never block chat on it.
+      }
+    }
     return grounding;
+  }
+
+  /** Convert the grounding context into numbered ChatSources for the UI. */
+  private toSources(grounding?: GroundingContext): ChatSource[] | undefined {
+    if (!grounding) return undefined;
+    const out: ChatSource[] = [];
+    const pages = grounding.pages ?? [];
+    pages.forEach((p, i) => {
+      if (p.page === 0 && p.text.startsWith('Key concepts')) return; // graph node block is not a source
+      out.push({
+        sourceId: `doc-page-${p.page}-${i}`,
+        url: grounding.documentId ? `document://${grounding.documentId}#page=${p.page}` : '',
+        title: grounding.documentTitle ? `${grounding.documentTitle} — Page ${p.page}` : `Page ${p.page}`,
+        domain: 'document',
+        retrievedAt: grounding.retrievedAt ?? Date.now(),
+        relevantText: p.text.slice(0, 300),
+        confidence: 1,
+        requestId: grounding.documentId ?? '',
+      });
+    });
+    grounding.sources?.forEach((s, i) => {
+      out.push({
+        sourceId: `web-${i}`,
+        url: s.url,
+        title: s.title,
+        domain: safeDomain(s.url),
+        retrievedAt: s.retrievedAt,
+        relevantText: s.text.slice(0, 300),
+        confidence: 1,
+        requestId: '',
+      });
+    });
+    return out.length > 0 ? out : undefined;
   }
 
   private publish(topic: string, payload: unknown): void {
     this.deps.eventBus.publish(topic, payload, 'client');
+  }
+}
+
+function safeDomain(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
   }
 }

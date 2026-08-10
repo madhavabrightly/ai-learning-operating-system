@@ -13,6 +13,8 @@ export interface ChatState {
   sources: ChatSource[];
   sending: boolean;
   error?: string;
+  /** Live text of the in-flight streaming reply. */
+  liveText: string;
 }
 
 export interface ChatActions {
@@ -21,6 +23,9 @@ export interface ChatActions {
   selectConversation: (conversationId: string) => Promise<void>;
   sendMessage: (content: string, context?: { documentId?: string; selection?: string }) => Promise<void>;
   runAction: (intent: AiActionIntent, context?: { documentId?: string; selection?: string }) => Promise<void>;
+  regenerate: (context?: { documentId?: string; selection?: string }) => Promise<void>;
+  followUp: (context?: { documentId?: string; selection?: string }) => Promise<void>;
+  stop: () => void;
   research: (query: string, context?: { documentId?: string; url?: string }) => Promise<void>;
   deleteConversation: (conversationId: string) => Promise<void>;
   clearError: () => void;
@@ -35,6 +40,27 @@ export interface CreateChatStoreOptions {
 }
 
 export function createChatStore({ service, eventBus, initial }: CreateChatStoreOptions) {
+  let abortController: AbortController | undefined;
+
+  const applyResult = async (result: Awaited<ReturnType<ChatService['sendMessage']>>, set: (fn: (s: ChatState) => Partial<ChatState>) => void, get: () => ChatStore) => {
+    if (result.success && result.data) {
+      const messages = await service.loadConversation(result.data.conversation.id);
+      const conversations = await service.listConversations();
+      set((s) => ({
+        activeConversationId: result.data!.conversation.id,
+        messages: messages.success && messages.data ? messages.data : s.messages,
+        conversations: conversations.success && conversations.data ? conversations.data : s.conversations,
+        sources: result.data!.sources ?? [],
+        streaming: false,
+        sending: false,
+        liveText: '',
+        error: undefined,
+      }));
+    } else {
+      set((s) => ({ sending: false, streaming: false, liveText: '', error: result.error ?? 'Message failed' }));
+    }
+  };
+
   return create<ChatStore>((set, get) => ({
     conversations: [],
     messages: [],
@@ -42,6 +68,7 @@ export function createChatStore({ service, eventBus, initial }: CreateChatStoreO
     sources: [],
     sending: false,
     error: undefined,
+    liveText: '',
     ...initial,
 
     init: async () => {
@@ -53,7 +80,7 @@ export function createChatStore({ service, eventBus, initial }: CreateChatStoreO
 
     newConversation: async (documentId) => {
       const conv = await service.createConversation(documentId);
-      set({ activeConversationId: conv.id, messages: [], sources: [], error: undefined });
+      set({ activeConversationId: conv.id, messages: [], sources: [], error: undefined, liveText: '' });
     },
 
     selectConversation: async (conversationId) => {
@@ -62,59 +89,85 @@ export function createChatStore({ service, eventBus, initial }: CreateChatStoreO
         activeConversationId: conversationId,
         messages: result.success && result.data ? result.data : [],
         error: undefined,
+        liveText: '',
       });
     },
 
     sendMessage: async (content, context) => {
-      if (!content.trim()) return;
+      if (!content.trim() || get().sending) return;
+      abortController = new AbortController();
       const conversationId = get().activeConversationId;
-      set({ sending: true, error: undefined });
+      set({ sending: true, streaming: true, error: undefined, liveText: '' });
       const result = await service.sendMessage(conversationId, content, context ?? {}, {
         stream: true,
-        onDelta: () => {
-          // Streaming content is applied via onStatus polling below; we reload
-          // messages from the store after completion for simplicity.
+        signal: abortController.signal,
+        onDelta: (delta) => {
+          set((s) => ({ liveText: s.liveText + delta }));
         },
         onStatus: (status) => {
           set({ streaming: status === 'sending' || status === 'streaming' });
         },
       });
-      if (result.success && result.data) {
-        const messages = await service.loadConversation(result.data.conversation.id);
-        const conversations = await service.listConversations();
-        set({
-          activeConversationId: result.data.conversation.id,
-          messages: messages.success && messages.data ? messages.data : [],
-          conversations: conversations.success && conversations.data ? conversations.data : get().conversations,
-          sources: result.data.sources ?? [],
-          streaming: false,
-          sending: false,
-        });
-        eventBus.publish('chat.message_sent', { conversationId: result.data.conversation.id }, 'client');
-      } else {
-        set({ sending: false, streaming: false, error: result.error ?? 'Message failed' });
-      }
+      await applyResult(result, set, get);
+      eventBus.publish('chat.message_sent', { conversationId: result.success ? result.data?.conversation.id : undefined }, 'client');
     },
 
     runAction: async (intent, context) => {
+      if (get().sending) return;
+      abortController = new AbortController();
       const conversationId = get().activeConversationId;
-      set({ sending: true, error: undefined });
+      set({ sending: true, streaming: true, error: undefined, liveText: '' });
       const result = await service.runAction(conversationId ?? '', intent, context ?? {});
-      if (result.success && result.data) {
-        const messages = await service.loadConversation(result.data.conversation.id);
-        set({
-          activeConversationId: result.data.conversation.id,
-          messages: messages.success && messages.data ? messages.data : [],
-          sending: false,
-        });
-      } else {
-        set({ sending: false, error: result.error ?? 'Action failed' });
-      }
+      await applyResult(result, set, get);
+    },
+
+    regenerate: async (context) => {
+      const conversationId = get().activeConversationId;
+      if (!conversationId || get().sending) return;
+      abortController = new AbortController();
+      set({ sending: true, streaming: true, error: undefined, liveText: '' });
+      const result = await service.regenerate(conversationId, context ?? {}, {
+        stream: true,
+        signal: abortController.signal,
+        onDelta: (delta) => {
+          set((s) => ({ liveText: s.liveText + delta }));
+        },
+        onStatus: (status) => {
+          set({ streaming: status === 'sending' || status === 'streaming' });
+        },
+      });
+      await applyResult(result, set, get);
+    },
+
+    followUp: async (context) => {
+      const conversationId = get().activeConversationId;
+      if (!conversationId || get().sending) return;
+      abortController = new AbortController();
+      set({ sending: true, streaming: true, error: undefined, liveText: '' });
+      const result = await service.followUp(conversationId, context ?? {}, {
+        stream: true,
+        signal: abortController.signal,
+        onDelta: (delta) => {
+          set((s) => ({ liveText: s.liveText + delta }));
+        },
+        onStatus: (status) => {
+          set({ streaming: status === 'sending' || status === 'streaming' });
+        },
+      });
+      await applyResult(result, set, get);
+    },
+
+    stop: () => {
+      abortController?.abort();
+      abortController = undefined;
+      set({ streaming: false, sending: false });
     },
 
     research: async (query, context) => {
+      if (get().sending) return;
+      abortController = new AbortController();
       const conversationId = get().activeConversationId;
-      set({ sending: true, error: undefined });
+      set({ sending: true, streaming: true, error: undefined, liveText: '' });
       const result = await service.research(conversationId ?? '', query, {
         documentId: context?.documentId,
         url: context?.url,
@@ -125,10 +178,13 @@ export function createChatStore({ service, eventBus, initial }: CreateChatStoreO
           activeConversationId: result.data.conversation.id,
           messages: messages.success && messages.data ? messages.data : [],
           sources: result.data.sources ?? [],
+          streaming: false,
           sending: false,
+          liveText: '',
+          error: undefined,
         });
       } else {
-        set({ sending: false, error: result.error ?? 'Research failed' });
+        set({ sending: false, streaming: false, liveText: '', error: result.error ?? 'Research failed' });
       }
     },
 
@@ -139,6 +195,7 @@ export function createChatStore({ service, eventBus, initial }: CreateChatStoreO
         conversations: state.conversations.filter((c) => c.id !== conversationId),
         activeConversationId: state.activeConversationId === conversationId ? undefined : state.activeConversationId,
         messages: state.activeConversationId === conversationId ? [] : state.messages,
+        liveText: '',
       });
     },
 

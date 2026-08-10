@@ -17,6 +17,7 @@ import { IndexedDbDocumentStorage } from '@/modules/document/storage/IndexedDbDo
 import { BackendHttpClient } from '@/services/BackendClient';
 import { createAiProviderClient } from '@/modules/ai/AiProviderClient';
 import { ChatService } from '@/modules/chat/ChatService';
+import type { ChatServiceDeps } from '@/modules/chat/ChatService';
 import { IndexedDbChatPersistence } from '@/modules/chat/IndexedDbChatPersistence';
 import { GraphService } from '@/modules/graph/service/GraphService';
 import { createBackendGraphExtractor } from '@/modules/graph/service/BackendGraphExtractor';
@@ -115,6 +116,9 @@ export function createContainer(): IContainer {
   const graphExtractor = createBackendGraphExtractor(backendClient);
   const graphService = new GraphService(eventBus, logger.child('Graph'), documentService, { extractor: graphExtractor });
   container.registerInstance(TOKENS.graphService, graphService);
+
+  // Chat gets the graph for concept injection AFTER the graph is registered.
+  (chatService as unknown as { deps: ChatServiceDeps }).deps.graph = graphService;
 
   const notesService = new NotesService(diskCache, eventBus);
   container.registerInstance(TOKENS.notesService, notesService);

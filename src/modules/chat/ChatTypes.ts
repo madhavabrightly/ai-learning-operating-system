@@ -38,5 +38,6 @@ export interface ChatPersistence {
   saveMessage(message: ChatMessage): Promise<void>;
   listConversations(): Promise<Conversation[]>;
   listMessages(conversationId: string): Promise<ChatMessage[]>;
+  deleteMessage(messageId: string): Promise<void>;
   deleteConversation(conversationId: string): Promise<void>;
 }

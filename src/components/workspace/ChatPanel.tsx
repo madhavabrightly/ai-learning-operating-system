@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Send, Sparkles, ExternalLink } from 'lucide-react';
+import { Send, Sparkles, ExternalLink, Square, RotateCcw, CornerDownRight } from 'lucide-react';
 import type { ChatStore } from '@/store/ChatStore';
 import type { AiActionIntent } from '@/modules/ai/AiProviderClient';
 import { cn } from '@/utils/cn';
@@ -32,8 +32,6 @@ export function ChatPanel({ chat, documentId, selection, onOpenSource }: ChatPan
     const content = input;
     setInput('');
     if (researchMode) {
-      // A URL in the research input is fetched directly; otherwise the backend
-      // researches the query (Bright Data browser or direct-fetch fallback).
       const trimmed = content.trim();
       let url: string | undefined;
       let query = trimmed;
@@ -56,6 +54,8 @@ export function ChatPanel({ chat, documentId, selection, onOpenSource }: ChatPan
   const runAction = (intent: AiActionIntent) => {
     void chat.runAction(intent, { documentId, selection });
   };
+
+  const lastAssistantComplete = chat.messages.some((m) => m.role === 'assistant' && m.status === 'complete');
 
   return (
     <div className="flex h-full flex-col">
@@ -86,7 +86,7 @@ export function ChatPanel({ chat, documentId, selection, onOpenSource }: ChatPan
       </div>
 
       {/* Actions */}
-      <div className="mb-2 flex flex-wrap gap-1">
+      <div className="mb-2 flex flex-wrap items-center gap-1">
         {ACTIONS.map((a) => (
           <button
             key={a.intent}
@@ -109,17 +109,44 @@ export function ChatPanel({ chat, documentId, selection, onOpenSource }: ChatPan
           <Sparkles className="h-3 w-3" />
           Research
         </button>
+
+        {/* Regenerate / Follow-up only make sense after a completed answer. */}
+        {lastAssistantComplete && !chat.sending && (
+          <>
+            <button
+              type="button"
+              onClick={() => void chat.regenerate({ documentId, selection })}
+              className="flex items-center gap-1 rounded border border-border bg-muted/30 px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              title="Regenerate the last answer"
+            >
+              <RotateCcw className="h-3 w-3" />
+              Regenerate
+            </button>
+            <button
+              type="button"
+              onClick={() => void chat.followUp({ documentId, selection })}
+              className="flex items-center gap-1 rounded border border-border bg-muted/30 px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              title="Suggest follow-up questions"
+            >
+              <CornerDownRight className="h-3 w-3" />
+              Follow-up
+            </button>
+          </>
+        )}
       </div>
 
       {chat.error && (
         <div role="alert" className="mb-2 rounded border border-destructive/20 bg-destructive/10 p-2 text-xs text-destructive">
           {chat.error}
+          <button type="button" onClick={chat.clearError} className="ml-2 underline">
+            Dismiss
+          </button>
         </div>
       )}
 
       {/* Messages */}
       <div className="min-h-0 flex-1 space-y-3 overflow-auto pr-1">
-        {chat.messages.length === 0 && (
+        {chat.messages.length === 0 && !chat.sending && (
           <p className="pt-8 text-center text-xs text-muted-foreground">
             Ask a question about the document, or use an action button above.
             {selection && <span className="mt-2 block text-foreground/70">Selected text: “{selection.slice(0, 80)}…”</span>}
@@ -134,21 +161,35 @@ export function ChatPanel({ chat, documentId, selection, onOpenSource }: ChatPan
             Working…
           </div>
         )}
+        {/* Live streaming bubble */}
+        {chat.streaming && chat.liveText && (
+          <div className="flex justify-start">
+            <div className="max-w-[85%] whitespace-pre-wrap rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-foreground">
+              {chat.liveText}
+              <span className="ml-0.5 inline-block animate-pulse">▍</span>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Sources */}
+      {/* Sources — numbered to match inline citations [1], [2] */}
       {chat.sources.length > 0 && (
         <div className="mt-2 rounded border border-border bg-muted/30 p-2">
           <p className="mb-1 text-[10px] font-medium uppercase text-muted-foreground">Sources ({chat.sources.length})</p>
           <div className="max-h-28 space-y-1 overflow-auto">
-            {chat.sources.map((s) => (
+            {chat.sources.map((s, i) => (
               <button
                 key={s.sourceId}
                 type="button"
                 onClick={() => onOpenSource(s.url)}
                 className="flex w-full items-center justify-between gap-2 rounded border border-border bg-background px-2 py-1 text-left text-[11px] transition-colors hover:bg-muted"
               >
-                <span className="truncate text-foreground">{s.title}</span>
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded bg-primary/10 text-[10px] font-medium text-primary">
+                    {i + 1}
+                  </span>
+                  <span className="truncate text-foreground">{s.title}</span>
+                </span>
                 <ExternalLink className="h-3 w-3 flex-shrink-0 text-muted-foreground" />
               </button>
             ))}
@@ -168,15 +209,26 @@ export function ChatPanel({ chat, documentId, selection, onOpenSource }: ChatPan
           placeholder={researchMode ? 'Research query (web)…' : 'Ask about the document…'}
           className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
-        <button
-          type="button"
-          onClick={send}
-          disabled={chat.sending || !input.trim()}
-          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-          aria-label="Send message"
-        >
-          <Send className="h-4 w-4" />
-        </button>
+        {chat.sending || chat.streaming ? (
+          <button
+            type="button"
+            onClick={chat.stop}
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/20"
+            aria-label="Stop generating"
+          >
+            <Square className="h-4 w-4" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={send}
+            disabled={!input.trim()}
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary transition-colors hover:bg-primary/90 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="Send message"
+          >
+            <Send className="h-4 w-4" />
+          </button>
+        )}
       </div>
     </div>
   );
