@@ -1,5 +1,8 @@
 const DB_NAME = 'aios-documents';
-const DB_VERSION = 1;
+// v2: the document pipeline parses real uploaded files. Records written by the
+// earlier mock/demo build are purged on upgrade (see onupgradeneeded) so stale
+// sample pages can never be restored into the viewer or chat grounding.
+const DB_VERSION = 2;
 const PAGES_STORE = 'pages';
 const STRUCTURE_STORE = 'structure';
 
@@ -8,8 +11,15 @@ import type { DocumentPage, DocumentStructure } from '../types/DocumentTypes';
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
+      // Purge legacy stores written by the pre-parser (mock/demo) build so
+      // old demo pages can never resurface after this upgrade.
+      if (event.oldVersion < 2) {
+        for (const name of [PAGES_STORE, STRUCTURE_STORE]) {
+          if (db.objectStoreNames.contains(name)) db.deleteObjectStore(name);
+        }
+      }
       if (!db.objectStoreNames.contains(PAGES_STORE)) {
         db.createObjectStore(PAGES_STORE, { keyPath: 'id' });
       }

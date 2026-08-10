@@ -45,6 +45,13 @@ export function retrieveChunks(
     }
   }
 
+  if (candidates.length === 0) {
+    // Nothing matched the question — still ground the answer in the real
+    // document by serving its opening pages rather than leaving the AI
+    // ungrounded (or worse, falling back to demo data).
+    return doc.pages.slice(0, count).map((p) => ({ page: p.index, text: excerpt(pageTextOf(p), maxChars), score: 0 }));
+  }
+
   candidates.sort((a, b) => b.score - a.score);
   return candidates.slice(0, count);
 }

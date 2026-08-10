@@ -1,15 +1,25 @@
 import type { ChatPersistence, ChatMessage, Conversation } from './ChatTypes';
 
 const DB_NAME = 'aios-chat';
-const DB_VERSION = 1;
+// v2: conversations/messages persisted by the earlier mock/demo build (stale
+// "Binary Search" demo threads) are purged on upgrade so they can't resurface
+// in the chat sidebar.
+const DB_VERSION = 2;
 const CONVERSATIONS_STORE = 'conversations';
 const MESSAGES_STORE = 'messages';
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
+      // Purge legacy stores written by the pre-parser (mock/demo) build so
+      // stale demo conversations can never be restored into the chat list.
+      if (event.oldVersion < 2) {
+        for (const name of [CONVERSATIONS_STORE, MESSAGES_STORE]) {
+          if (db.objectStoreNames.contains(name)) db.deleteObjectStore(name);
+        }
+      }
       if (!db.objectStoreNames.contains(CONVERSATIONS_STORE)) {
         db.createObjectStore(CONVERSATIONS_STORE, { keyPath: 'id' });
       }

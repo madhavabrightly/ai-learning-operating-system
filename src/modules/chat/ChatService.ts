@@ -88,7 +88,7 @@ export class ChatService implements IChatService {
       };
       await this.deps.persistence.saveMessage(userMessage);
 
-      const grounding = await this.buildGroundingContext(context.documentId, context.selection);
+      const grounding = await this.buildGroundingContext(context.documentId, context.selection, content);
       const history = await this.loadForPrompt(effectiveConversation.id);
       const request = {
         conversationId: effectiveConversation.id,
@@ -386,7 +386,7 @@ export class ChatService implements IChatService {
   }
 
   /** Build grounded context + inject graph concepts for provenance. */
-  private async buildGroundingContext(documentId?: string, selection?: string): Promise<GroundingContext | undefined> {
+  private async buildGroundingContext(documentId?: string, selection?: string, query?: string): Promise<GroundingContext | undefined> {
     if (!documentId) {
       return selection ? { selection } : undefined;
     }
@@ -395,7 +395,10 @@ export class ChatService implements IChatService {
       return selection ? { selection, documentId } : { documentId };
     }
     const doc = docResult.data;
-    const queryText = selection ?? doc.title;
+    // Retrieve against the user's actual question (falling back to a text
+    // selection, then the title) so grounding reflects what was asked, not
+    // just the document's name.
+    const queryText = selection ?? (query?.trim() || doc.title);
 
     const chunks = retrieveChunks(doc, queryText, 6, 1800);
     const grounding: GroundingContext = {
