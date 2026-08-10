@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
-import { Send, Sparkles, ExternalLink, Square, RotateCcw, CornerDownRight } from 'lucide-react';
+import { Send, Sparkles, ExternalLink, Square, RotateCcw, CornerDownRight, ChevronDown } from 'lucide-react';
 import type { ChatStore } from '@/store/ChatStore';
 import type { AiActionIntent } from '@/modules/ai/AiProviderClient';
 import { cn } from '@/utils/cn';
@@ -31,12 +31,24 @@ export function ChatPanel({ chat, documentId, selection, onOpenSource }: ChatPan
   const [input, setInput] = useState('');
   const [researchMode, setResearchMode] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const nearBottomRef = useRef(true);
 
-  // FIX 3 — auto-scroll: keep the newest token in view whenever the message
-  // list, the live stream, or the live reasoning block changes.
+  // Auto-scroll: keep the newest message/streaming token in view whenever the
+  // message list, the live stream, or the live reasoning block changes. Only
+  // auto-scroll when the user is already near the bottom so scrolling up to
+  // re-read history is never interrupted.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (!nearBottomRef.current) return;
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [chat.messages, chat.liveText, chat.liveReasoning, chat.sending, chat.streaming]);
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    // Within 80px of the bottom counts as "near the bottom".
+    nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
 
   const send = () => {
     if (!input.trim() || chat.sending) return;
@@ -96,8 +108,9 @@ export function ChatPanel({ chat, documentId, selection, onOpenSource }: ChatPan
         </button>
       </div>
 
-      {/* Actions */}
-      <div className="mb-2 flex flex-wrap items-center gap-1">
+      {/* Actions — one compact row; overflow scrolls horizontally so the
+          action bar never crowds the conversation view */}
+      <div className="mb-2 flex flex-nowrap items-center gap-1 overflow-x-auto overscroll-x-contain pb-0.5 [scrollbar-width:thin]">
         {ACTIONS.map((a) => (
           <button
             key={a.intent}
@@ -155,8 +168,9 @@ export function ChatPanel({ chat, documentId, selection, onOpenSource }: ChatPan
         </div>
       )}
 
-      {/* Messages */}
-      <div className="min-h-0 flex-1 space-y-3 overflow-auto pr-1">
+      {/* Messages — flex-1 + min-h-0 so the list fills the available height
+          and scrolls independently instead of pushing siblings off-screen */}
+      <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1">
         {chat.messages.length === 0 && !chat.sending && (
           <p className="pt-8 text-center text-xs text-muted-foreground">
             Ask a question about the document, or use an action button above.
@@ -186,11 +200,16 @@ export function ChatPanel({ chat, documentId, selection, onOpenSource }: ChatPan
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Sources — numbered to match inline citations [1], [2] */}
+      {/* Sources — numbered to match inline citations [1], [2]. Collapsed by
+          default (native disclosure) so a long source list never crowds the
+          conversation view. */}
       {chat.sources.length > 0 && (
-        <div className="mt-2 rounded border border-border bg-muted/30 p-2">
-          <p className="mb-1 text-[10px] font-medium uppercase text-muted-foreground">Sources ({chat.sources.length})</p>
-          <div className="max-h-28 space-y-1 overflow-auto">
+        <details className="group mt-2 rounded border border-border bg-muted/30">
+          <summary className="flex cursor-pointer select-none items-center justify-between gap-2 rounded px-2 py-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <span>Sources ({chat.sources.length})</span>
+            <ChevronDown className="h-3 w-3 flex-shrink-0 transition-transform duration-200 ease-out group-open:rotate-180" />
+          </summary>
+          <div className="max-h-28 space-y-1 overflow-auto border-t border-border p-1.5">
             {chat.sources.map((s, i) => (
               <button
                 key={s.sourceId}
@@ -208,7 +227,7 @@ export function ChatPanel({ chat, documentId, selection, onOpenSource }: ChatPan
               </button>
             ))}
           </div>
-        </div>
+        </details>
       )}
 
       {/* Input wrapped in a form so Enter is handled natively with preventDefault */}
