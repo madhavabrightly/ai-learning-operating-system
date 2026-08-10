@@ -4,6 +4,9 @@ import type { Result } from '@/errors/types';
 import { EventTopics } from '@/events/EventTopics';
 import type { IEventBus } from '@/events/types';
 import type { ILogger } from '@/logging/ILogger';
+import type { IndexedDbDocumentStorage } from '../storage/IndexedDbDocumentStorage';
+import type { ParsedDocument } from '../model/DocumentModel';
+import { normalizeParserOutput, type ParserOutput, type RawPage } from '../model/normalizer';
 import type {
   DocumentReference,
   DocumentPage,
@@ -16,12 +19,19 @@ import type {
 const MOCK_PAGES: Record<string, DocumentPage[]> = {};
 const MOCK_STRUCTURE: Record<string, DocumentStructure> = {};
 
+export interface DocumentServiceOptions {
+  extractFigures?: boolean;
+  maxFigureSize?: number;
+}
+
 export class DocumentService implements IDocumentService {
   private documents = new Map<string, DocumentReference>();
 
   constructor(
     private readonly eventBus: IEventBus,
     private readonly logger: ILogger,
+    private readonly storage?: IndexedDbDocumentStorage,
+    private readonly options: DocumentServiceOptions = {},
   ) {}
 
   async upload(file: File, documentId?: string): Promise<Result<DocumentReference>> {
@@ -102,6 +112,34 @@ export class DocumentService implements IDocumentService {
   async setZoom(documentId: string, zoom: number): Promise<Result<void>> {
     this.eventBus.publish(EventTopics.DOCUMENT_ZOOM_CHANGED, { documentId, zoom }, 'client');
     return ok(undefined);
+  }
+
+  async getDocument(documentId: string): Promise<Result<ParsedDocument>> {
+    const ref = this.documents.get(documentId);
+    if (!ref) return { success: false, error: `Document ${documentId} not found`, retryable: false, fallbackAvailable: false };
+    const pages = MOCK_PAGES[documentId] ?? [];
+    const structure = MOCK_STRUCTURE[documentId] ?? { headings: [], formulas: [], tables: [], figures: [] };
+
+    const rawPages: RawPage[] = pages.map((p) => ({
+      index: p.index,
+      text: p.text ?? '',
+      blocks: p.blocks?.map((b) => ({
+        type: b.type as 'text' | 'heading' | 'list' | 'code' | 'quote' | 'image' | 'table' | 'formula' | 'caption',
+        text: b.text,
+        bbox: b.width && b.height ? { x: b.x, y: b.y, width: b.width, height: b.height } : undefined,
+      })) ?? [],
+    }));
+
+    const parserOutput: ParserOutput = {
+      title: ref.title,
+      format: ref.mimeType?.includes('pdf') ? 'pdf' : ref.mimeType?.includes('docx') ? 'docx' : ref.mimeType?.includes('html') ? 'html' : 'txt',
+      pages: rawPages,
+      tables: structure.tables.map((t) => ({ page: t.page, headers: t.rows[0]?.map(() => ''), rows: t.rows, caption: undefined })),
+      parserEngine: 'aios-document-service',
+    };
+
+    const doc = normalizeParserOutput(parserOutput, { documentId });
+    return ok(doc);
   }
 }
 

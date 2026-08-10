@@ -18,6 +18,7 @@ export interface ProcessingMetrics {
   pipelineSuccessRate: number;
   recoveryCount: number;
   retriesAverage: number;
+  failedPipelines: number;
 }
 
 export interface StudySession {

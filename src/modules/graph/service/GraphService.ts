@@ -3,6 +3,8 @@ import type { Result } from '@/errors/types';
 import type { IEventBus } from '@/events/types';
 import { EventTopics } from '@/events/EventTopics';
 import type { ILogger } from '@/logging/ILogger';
+import type { DocumentService } from '@/modules/document/service/DocumentService';
+import type { GraphExtractor } from './BackendGraphExtractor';
 import type { Concept, ConceptId, IGraphService, KnowledgeGraph } from '../types/GraphTypes';
 
 const DEMO_GRAPH: KnowledgeGraph = {
@@ -53,20 +55,38 @@ const DEMO_GRAPH: KnowledgeGraph = {
 
 export class GraphService implements IGraphService {
   private graphs = new Map<string, KnowledgeGraph>();
+  private extractor?: GraphExtractor;
 
   constructor(
     private readonly eventBus: IEventBus,
     private readonly logger: ILogger,
-  ) {}
+    _documentService?: DocumentService,
+    options?: { extractor?: GraphExtractor },
+  ) {
+    if (options?.extractor) {
+      this.extractor = options.extractor;
+    }
+  }
 
   async load(documentId: string): Promise<Result<KnowledgeGraph>> {
     let graph = this.graphs.get(documentId);
     if (!graph) {
-      graph = {
-        ...DEMO_GRAPH,
-        concepts: DEMO_GRAPH.concepts.map((c) => ({ ...c, sourceDocumentId: documentId })),
-      };
-      this.graphs.set(documentId, graph);
+      // Try the backend extractor first; fall back to the demo graph when the
+      // backend is unavailable so the workspace never blocks on it.
+      if (this.extractor) {
+        const extracted = await this.extractor.extract(documentId);
+        if (extracted.success && extracted.data) {
+          graph = extracted.data;
+          this.graphs.set(documentId, graph);
+        }
+      }
+      if (!graph) {
+        graph = {
+          ...DEMO_GRAPH,
+          concepts: DEMO_GRAPH.concepts.map((c) => ({ ...c, sourceDocumentId: documentId })),
+        };
+        this.graphs.set(documentId, graph);
+      }
     }
     this.eventBus.publish(EventTopics.CONCEPTS_EXTRACTED, { documentId, concepts: graph.concepts }, 'client');
     this.logger.info('Graph loaded', { documentId, concepts: graph.concepts.length });

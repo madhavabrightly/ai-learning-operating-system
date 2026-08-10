@@ -3,6 +3,7 @@ import type { IEventBus } from '@/events/types';
 import { EventTopics } from '@/events/EventTopics';
 import type { IDocumentService } from '@/modules/document/types/DocumentTypes';
 import type { DocumentReference, DocumentPage, DocumentStructure, DocumentQuality, DocumentSelection } from '@/modules/document/types/DocumentTypes';
+import type { ParsedDocument } from '@/modules/document/model/DocumentModel';
 import type { WorkspaceContextState } from '@/modules/workspace/types/WorkspaceTypes';
 
 export interface WebPageSource {
@@ -14,6 +15,7 @@ export interface WebPageSource {
 export interface DocumentState {
   documents: DocumentReference[];
   currentDocumentId?: string;
+  currentDocument?: ParsedDocument;
   pages: DocumentPage[];
   structure?: DocumentStructure;
   quality?: DocumentQuality;
@@ -26,8 +28,10 @@ export interface DocumentState {
 }
 
 export interface DocumentActions {
+  list: () => Promise<DocumentReference[]>;
   upload: (file: File) => Promise<DocumentReference | undefined>;
   open: (documentId: string) => Promise<DocumentReference | undefined>;
+  delete: (documentId: string) => Promise<void>;
   setPage: (page: number) => void;
   setZoom: (zoom: number) => void;
   setSelection: (selection: WorkspaceContextState['selection']) => void;
@@ -54,6 +58,11 @@ export function createDocumentStore({ service, eventBus, initial }: CreateDocume
     loading: false,
     error: undefined,
     ...initial,
+
+    list: async () => {
+      const state = get();
+      return state.documents;
+    },
 
     upload: async (file) => {
       set({ loading: true, error: undefined });
@@ -85,6 +94,7 @@ export function createDocumentStore({ service, eventBus, initial }: CreateDocume
       ]);
       set({
         currentDocumentId: documentId,
+        currentDocument: refResult.data as unknown as ParsedDocument,
         pages: pagesResult.success && pagesResult.data ? pagesResult.data : [],
         structure: structureResult.success && structureResult.data ? structureResult.data : undefined,
         quality: qualityResult.success && qualityResult.data ? qualityResult.data : undefined,
@@ -93,6 +103,18 @@ export function createDocumentStore({ service, eventBus, initial }: CreateDocume
       });
       eventBus.publish(EventTopics.DOCUMENT_OPENED, { documentId, title: refResult.data.title }, 'client');
       return refResult.data;
+    },
+
+    delete: async (documentId) => {
+      const state = get();
+      await service.close(documentId);
+      set({
+        documents: state.documents.filter((d) => d.id !== documentId),
+        currentDocumentId: state.currentDocumentId === documentId ? undefined : state.currentDocumentId,
+        currentDocument: state.currentDocumentId === documentId ? undefined : state.currentDocument,
+        pages: state.currentDocumentId === documentId ? [] : state.pages,
+        searchResults: state.currentDocumentId === documentId ? [] : state.searchResults,
+      });
     },
 
     setPage: (page) => {

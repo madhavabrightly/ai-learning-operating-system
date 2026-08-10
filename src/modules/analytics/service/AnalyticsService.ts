@@ -1,13 +1,20 @@
 import { ok } from '@/errors/ResultFactory';
 import type { Result } from '@/errors/types';
 import type { ICache } from '@/cache/types';
+import type { RuntimeOrchestrator } from '@/runtime/scheduler/RuntimeOrchestrator';
 import type { IAnalyticsService, ProcessingMetrics, StudyMetrics, StudySession } from '../types/AnalyticsTypes';
 
 const METRICS_KEY = 'aios-study-metrics';
 const SESSIONS_KEY = 'aios-study-sessions';
 
 export class AnalyticsService implements IAnalyticsService {
+  private orchestrator?: RuntimeOrchestrator;
+
   constructor(private readonly cache: ICache) {}
+
+  attachOrchestrator(orchestrator: RuntimeOrchestrator): void {
+    this.orchestrator = orchestrator;
+  }
 
   async getStudyMetrics(): Promise<Result<StudyMetrics>> {
     const result = await this.cache.get<StudyMetrics>(METRICS_KEY);
@@ -15,12 +22,17 @@ export class AnalyticsService implements IAnalyticsService {
   }
 
   async getProcessingMetrics(): Promise<Result<ProcessingMetrics>> {
+    const telemetry = this.orchestrator?.getTelemetry() ?? [];
+    const completed = telemetry.filter((t) => t.status === 'SUCCESS' || t.status === 'PARTIAL_SUCCESS' || t.status === 'FALLBACK');
+    const failed = telemetry.filter((t) => t.status === 'FAILED');
+    const avgMs = completed.length > 0 ? Math.round(completed.reduce((s, t) => s + t.durationMs, 0) / completed.length) : 0;
     return ok({
       documentsUploaded: 0,
-      averageProcessingTimeMs: 0,
-      pipelineSuccessRate: 0,
-      recoveryCount: 0,
-      retriesAverage: 0,
+      averageProcessingTimeMs: avgMs,
+      pipelineSuccessRate: telemetry.length > 0 ? completed.length / telemetry.length : 0,
+      recoveryCount: telemetry.filter((t) => (t.recoveryPath?.length ?? 0) > 0).length,
+      retriesAverage: telemetry.length > 0 ? telemetry.reduce((s, t) => s + t.retries, 0) / telemetry.length : 0,
+      failedPipelines: failed.length,
     });
   }
 

@@ -1,211 +1,170 @@
-import { useMemo, useState } from 'react';
-import type { Task } from '@/runtime/types';
-import type { FailureInjector, FailureTarget } from '@/runtime/injection/FailureInjector';
-import { Play, RotateCcw, Loader2, AlertCircle, CheckCircle2, RefreshCw, Clock, Bug } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Activity, Play, RotateCcw, AlertTriangle, Terminal } from 'lucide-react';
 import { cn } from '@/utils/cn';
+import type { Task, TelemetrySnapshot } from '@/runtime/types';
+import type { FailureInjector } from '@/runtime/injection/FailureInjector';
 
 export interface RuntimeLabProps {
   tasks: Task[];
-  runPipeline: (documentId: string) => string | undefined;
+  runPipeline: (documentId: string) => void;
   reset: () => void;
-  /** Documents available to run a real pipeline on. */
-  documents: { id: string; title: string; status: string }[];
-  getTelemetry: () => { taskId: string; worker?: string; durationMs: number; retries: number; status: string; errorCategory?: string }[];
-  /** Developer-only failure injection (real failures, real retries). */
-  failureInjector?: FailureInjector;
+  documents: { id: string; title: string; status?: string }[];
+  getTelemetry: () => TelemetrySnapshot[];
+  failureInjector: FailureInjector;
 }
 
-/**
- * Runtime Lab — real observability over actual pipeline executions.
- * No mock documents, no simulated tasks: every node shown was scheduled,
- * executed, retried, or failed by the real orchestrator.
- */
+const STATUS_COLORS: Record<string, string> = {
+  CREATED: 'text-status-queued',
+  QUEUED: 'text-status-queued',
+  RUNNING: 'text-status-running',
+  WAITING: 'text-muted-foreground',
+  RETRYING: 'text-status-retrying',
+  FALLBACK: 'text-status-fallback',
+  PARTIAL_SUCCESS: 'text-status-fallback',
+  SUCCESS: 'text-status-success',
+  FAILED: 'text-status-failed',
+  CANCELLED: 'text-muted-foreground',
+  TIMEOUT: 'text-status-failed',
+};
+
 export function RuntimeLab({ tasks, runPipeline, reset, documents, getTelemetry, failureInjector }: RuntimeLabProps) {
-  const [selectedDoc, setSelectedDoc] = useState<string>('');
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [tab, setTab] = useState<'tasks' | 'telemetry' | 'injector'>('tasks');
   const telemetry = useMemo(() => getTelemetry(), [getTelemetry]);
-  const [injectionArmed, setInjectionArmed] = useState(false);
 
-  const run = () => {
-    if (!selectedDoc) return;
-    runPipeline(selectedDoc);
+  const handleRunPipeline = () => {
+    const doc = documents[0];
+    if (doc) runPipeline(doc.id);
   };
-
-  const armInjection = (target: FailureTarget) => {
-    failureInjector?.configure({ enabled: true, target, times: 1, message: `Injected ${target} failure (developer mode)`, code: 'INJECTED_FAILURE' });
-    setInjectionArmed(true);
-  };
-
-  const sortedTasks = useMemo(() => [...tasks].sort((a, b) => a.createdAt - b.createdAt), [tasks]);
 
   return (
     <div className="flex h-full flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <select
-          value={selectedDoc}
-          onChange={(e) => setSelectedDoc(e.target.value)}
-          className="flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none"
-          aria-label="Select document"
-        >
-          <option value="">Select an uploaded document…</option>
-          {documents.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.title} ({d.status})
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          onClick={run}
-          disabled={!selectedDoc}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-on-primary transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <Play className="h-3.5 w-3.5" />
-          Run pipeline
-        </button>
-        <button
-          type="button"
-          onClick={reset}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted/80"
-        >
-          <RotateCcw className="h-3.5 w-3.5" />
-          Reset
-        </button>
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-semibold uppercase text-muted-foreground">
+          <Activity className="mr-1 inline h-3 w-3" />
+          Runtime Inspector
+        </h3>
+        <div className="flex gap-1">
+          <button
+            type="button"
+            onClick={handleRunPipeline}
+            disabled={documents.length === 0}
+            className="flex items-center gap-1 rounded border border-border bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted disabled:opacity-40"
+          >
+            <Play className="h-3 w-3" /> Run
+          </button>
+          <button
+            type="button"
+            onClick={reset}
+            className="flex items-center gap-1 rounded border border-border bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted"
+          >
+            <RotateCcw className="h-3 w-3" /> Reset
+          </button>
+        </div>
       </div>
 
-      {documents.length === 0 && (
-        <p className="rounded border border-dashed border-border bg-muted/20 p-3 text-xs text-muted-foreground">
-          No documents uploaded yet. Upload a real document first, then run its pipeline here.
-        </p>
-      )}
+      <div className="flex gap-1 border-b border-border pb-1">
+        <TabBtn active={tab === 'tasks'} onClick={() => setTab('tasks')}>Tasks ({tasks.length})</TabBtn>
+        <TabBtn active={tab === 'telemetry'} onClick={() => setTab('telemetry')}>Telemetry ({telemetry.length})</TabBtn>
+        <TabBtn active={tab === 'injector'} onClick={() => setTab('injector')}>Injector</TabBtn>
+      </div>
 
-      {/* Developer failure injection — the failure is REAL and retry is REAL.
-          Always available (the injector is disabled by default and only fails
-          when explicitly armed), but labelled as a developer tool. */}
-      {failureInjector && (
-        <div className="rounded border border-dashed border-accent/40 bg-accent/5 p-2">
-          <div className="flex items-center justify-between">
-            <span className="flex items-center gap-1 text-[11px] font-medium text-accent">
-              <Bug className="h-3 w-3" />
-              Failure injection (dev)
-            </span>
-            {injectionArmed && <span className="text-[10px] text-accent">armed — run the pipeline</span>}
+      <div className="min-h-0 flex-1 overflow-auto">
+        {tab === 'tasks' && (
+          <div className="space-y-1">
+            {tasks.length === 0 && (
+              <p className="py-8 text-center text-xs text-muted-foreground">No tasks. Upload a document and click Run.</p>
+            )}
+            {tasks.map((task) => (
+              <div key={task.id} className="rounded border border-border bg-muted/20 p-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-foreground">{task.id}</span>
+                  <span className={cn('font-medium', STATUS_COLORS[task.status] ?? 'text-muted-foreground')}>
+                    {task.status}
+                  </span>
+                </div>
+                <div className="flex gap-2 text-[10px] text-muted-foreground">
+                  <span>Worker: {task.worker}</span>
+                  <span>Retries: {task.retryCount}</span>
+                </div>
+                {task.progress > 0 && (
+                  <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-primary transition-all"
+                      style={{ width: `${task.progress}%` }}
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
-          <div className="mt-1.5 flex gap-1">
-            <button
-              type="button"
-              onClick={() => armInjection('parse')}
-              className="rounded border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] text-accent transition-colors hover:bg-accent/20"
-            >
-              Fail parse once
-            </button>
-            <button
-              type="button"
-              onClick={() => armInjection('concepts')}
-              className="rounded border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] text-accent transition-colors hover:bg-accent/20"
-            >
-              Fail concepts once
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                failureInjector.disable();
-                setInjectionArmed(false);
-              }}
-              className="rounded border border-border bg-muted px-2 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-muted/80"
-            >
-              Disarm
-            </button>
-          </div>
-        </div>
-      )}
+        )}
 
-      {/* Tasks */}
-      <div className="min-h-0 flex-1 space-y-2 overflow-auto pr-1">
-        <h3 className="text-xs font-semibold uppercase text-muted-foreground">Real executions</h3>
-        {sortedTasks.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No pipeline runs yet.</p>
-        ) : (
-          sortedTasks.slice(-30).map((task) => (
-            <button
-              key={task.id}
-              type="button"
-              onClick={() => setSelectedTask(task)}
-              className={cn(
-                'w-full rounded border border-border bg-muted/30 p-2 text-left text-xs transition-colors hover:bg-muted/60',
-                selectedTask?.id === task.id && 'ring-1 ring-ring',
-              )}
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-medium text-foreground">{task.id}</span>
-                <StatusBadge status={task.status} retries={task.retryCount} />
+        {tab === 'telemetry' && (
+          <div className="space-y-1">
+            {telemetry.length === 0 && (
+              <p className="py-8 text-center text-xs text-muted-foreground">No telemetry data yet.</p>
+            )}
+            {telemetry.map((t, i) => (
+              <div key={i} className="rounded border border-border bg-muted/20 p-2 text-[10px]">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-foreground">{t.worker ?? 'unknown'}</span>
+                  <span className="text-muted-foreground">{t.durationMs}ms</span>
+                </div>
+                <div className="text-muted-foreground">
+                  {t.taskId.slice(0, 24)} · {t.status} · retries: {t.retries}
+                </div>
               </div>
-              <div className="mt-0.5 flex justify-between text-muted-foreground">
-                <span>{task.worker}</span>
-                <span>{task.progress}%</span>
-              </div>
-              <div className="mt-1 h-1 overflow-hidden rounded bg-muted">
-                <div className="h-full bg-primary transition-all" style={{ width: `${task.progress}%` }} />
-              </div>
-            </button>
-          ))
+            ))}
+          </div>
+        )}
+
+        {tab === 'injector' && (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">Simulate worker failures to test retry/recovery.</p>
+            <label className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={failureInjector.isEnabled}
+                onChange={() => failureInjector.toggle()}
+                className="rounded border-border accent-primary"
+              />
+              <span>Failure injection enabled</span>
+            </label>
+            <div className="space-y-2">
+              {['parser', 'knowledge'].map((type) => (
+                <div key={type} className="flex items-center gap-2 text-xs">
+                  <span className="w-20 text-muted-foreground">{type}</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.1}
+                    value={failureInjector.rates.get(type) ?? 0}
+                    onChange={(e) => failureInjector.setRate(type, parseFloat(e.target.value))}
+                    className="flex-1 accent-primary"
+                  />
+                  <span className="w-8 text-muted-foreground">{Math.round((failureInjector.rates.get(type) ?? 0) * 100)}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </div>
-
-      {/* Telemetry */}
-      <div className="rounded border border-border bg-muted/30 p-2">
-        <h3 className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Telemetry</h3>
-        <div className="max-h-24 space-y-0.5 overflow-auto text-[11px] text-muted-foreground">
-          {telemetry.slice(-8).map((t) => (
-            <div key={t.taskId} className="flex justify-between">
-              <span className="truncate">{t.taskId}</span>
-              <span>
-                {t.worker} · {t.durationMs}ms · {t.retries > 0 ? `${t.retries} retries · ` : ''}{t.status}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Detail */}
-      {selectedTask && (
-        <div className="rounded border border-border bg-muted/40 p-3 text-xs">
-          <div className="mb-1 font-medium text-foreground">{selectedTask.id}</div>
-          <div className="space-y-1 text-muted-foreground">
-            <div>Worker: {selectedTask.worker}</div>
-            <div>Status: {selectedTask.status}</div>
-            <div>Progress: {selectedTask.progress}%</div>
-            <div>Retries: {selectedTask.retryCount}</div>
-            {selectedTask.recoveryPath && selectedTask.recoveryPath.length > 0 && (
-              <div>Recovery: {selectedTask.recoveryPath.join(' → ')}</div>
-            )}
-            {selectedTask.error && <div className="text-status-failed">Error: {selectedTask.error.message}</div>}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
-function StatusBadge({ status, retries }: { status: string; retries: number }) {
-  const config: Record<string, { icon: React.ReactNode; color: string }> = {
-    SUCCESS: { icon: <CheckCircle2 className="h-3 w-3" />, color: 'text-status-success' },
-    PARTIAL_SUCCESS: { icon: <CheckCircle2 className="h-3 w-3" />, color: 'text-status-success' },
-    RUNNING: { icon: <Loader2 className="h-3 w-3 animate-spin" />, color: 'text-status-running' },
-    RETRYING: { icon: <RefreshCw className="h-3 w-3" />, color: 'text-status-retrying' },
-    FALLBACK: { icon: <AlertCircle className="h-3 w-3" />, color: 'text-status-fallback' },
-    FAILED: { icon: <AlertCircle className="h-3 w-3" />, color: 'text-status-failed' },
-    TIMEOUT: { icon: <AlertCircle className="h-3 w-3" />, color: 'text-status-failed' },
-    QUEUED: { icon: <Clock className="h-3 w-3" />, color: 'text-muted-foreground' },
-    WAITING: { icon: <Clock className="h-3 w-3" />, color: 'text-muted-foreground' },
-    CREATED: { icon: <Clock className="h-3 w-3" />, color: 'text-muted-foreground' },
-  };
-  const c = config[status] ?? config.QUEUED!;
+function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
-    <span className={cn('flex items-center gap-1 uppercase', c.color)}>
-      {c.icon}
-      {status}
-      {retries > 0 ? ` ×${retries}` : ''}
-    </span>
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'rounded px-2 py-1 text-[11px] font-medium transition-colors',
+        active ? 'bg-primary text-on-primary' : 'text-muted-foreground hover:bg-muted',
+      )}
+    >
+      {children}
+    </button>
   );
 }
