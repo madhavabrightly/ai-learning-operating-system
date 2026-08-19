@@ -48,4 +48,25 @@ export default defineConfig(() => ({
     allowedHosts: true as const,
     hmr: false,
   },
+  // Pre-bundle the app's real dependencies up front so a cold dev-server boot
+  // (fresh sandbox, no .vite cache) doesn't trigger a heavy on-demand esbuild
+  // pass while the preview is health-checking the port.
+  optimizeDeps: {
+    include: [
+      'react',
+      'react-dom',
+      'react-router-dom',
+      'react-error-boundary',
+      'react-markdown',
+      'remark-gfm',
+      'remark-math',
+      'katex',
+      'lucide-react',
+      'zustand',
+      'clsx',
+      'tailwind-merge',
+      'uuid',
+      '@supabase/supabase-js',
+    ],
+  },
 }))
