@@ -84,7 +84,9 @@ function portIsOpen(port) {
 /** Kill leftover node/vite processes holding the dev port. */
 async function clearStaleProcesses() {
   if (!(await portIsOpen(DEV_PORT))) return;
-  const pids = pidsListeningOnPort(DEV_PORT).filter(isNodeProcess);
+  const pids = pidsListeningOnPort(DEV_PORT).filter(
+    (pid) => pid !== process.pid && isNodeProcess(pid),
+  );
   if (pids.length === 0) {
     log(`port ${DEV_PORT} is occupied by a non-node process; leaving it alone`);
     return;
@@ -134,8 +136,10 @@ const PLACEHOLDER_HTML = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Loading…</title>
 <style>
-  body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;
-       background:#0b1220;color:#cbd5e1;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  html,body{margin:0;height:100%}
+  body{background:#0b1220;color:#cbd5e1;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+       display:flex;align-items:center;justify-content:center}
+  #root{width:100%;height:100%;display:flex;align-items:center;justify-content:center}
   .box{display:flex;align-items:center;gap:14px;font-size:15px}
   .spin{width:26px;height:26px;border-radius:50%;border:3px solid #1e293b;border-top-color:#6366f1;
         animation:spin 1s linear infinite;flex:none}
@@ -143,16 +147,21 @@ const PLACEHOLDER_HTML = `<!doctype html>
 </style>
 </head>
 <body data-placeholder="1">
-  <div class="box">
-    <div class="spin" aria-hidden="true"></div>
-    <div>Starting development server…</div>
+  <div id="root">
+    <div class="box">
+      <div class="spin" aria-hidden="true"></div>
+      <div>Starting development server…</div>
+    </div>
   </div>
   <script>
     (function poll() {
       fetch('/', { cache: 'no-store' })
         .then(function (r) { return r.text(); })
         .then(function (t) {
-          if (t.indexOf('id="root"') !== -1) { location.reload(); return; }
+          if (t.indexOf('id="root"') !== -1 && t.indexOf('data-placeholder') === -1) {
+            location.reload();
+            return;
+          }
           setTimeout(poll, 700);
         })
         .catch(function () { setTimeout(poll, 700); });
