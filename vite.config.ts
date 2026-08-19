@@ -39,6 +39,12 @@ export default defineConfig(() => ({
     }),
   ],
   server: {
+    // Bind to all interfaces so the preview proxy can always reach the dev
+    // server regardless of how the sandbox is networked. Also guarantees the
+    // server is reachable if the sandbox is re-provisioned mid-boot.
+    host: true,
+    port: 5173,
+    strictPort: true,
     allowedHosts: true as const,
     hmr: false,
   },
