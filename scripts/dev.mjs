@@ -28,7 +28,6 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEV_PORT = Number(process.env.PORT || 5173);
-const MAX_RETRIES = 8;
 const RETRY_DELAY_MS = 2000;
 const INSTALL_WAIT_MS = 2000; // poll interval while waiting for node_modules
 const INSTALL_MAX_WAIT_MS = 60000; // cap for waiting out a slow `npm install`
@@ -36,6 +35,8 @@ const VITE_BIN = path.join(ROOT, "node_modules", "vite", "bin", "vite.js");
 const PID_FILE = path.join(ROOT, "node_modules", `.vite-dev-${DEV_PORT}.pid`);
 
 const log = (...args) => console.log("[dev]", ...args);
+
+const MAX_RETRIES = 8;
 
 /** Resolve the PIDs of node processes listening on `port` (best effort, Linux /proc). */
 function pidsListeningOnPort(port) {
