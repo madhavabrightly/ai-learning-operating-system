@@ -47,6 +47,13 @@ export default defineConfig(() => ({
     strictPort: true,
     allowedHosts: true as const,
     hmr: false,
+    // Pre-transform the app's entry modules while the server boots (i.e.
+    // during the platform's install→dev scheduling gap) so the preview's
+    // first request after each sandbox rebuild renders the app immediately
+    // instead of waiting for on-demand transforms.
+    warmup: {
+      clientFiles: ['./src/main.tsx', './src/App.tsx'],
+    },
   },
   // Pre-bundle the app's real dependencies up front so a cold dev-server boot
   // (fresh sandbox, no .vite cache) doesn't trigger a heavy on-demand esbuild
