@@ -27,10 +27,12 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const DEV_PORT = Number(process.env.PORT || 5173);
-const MAX_RETRIES = 3;
-const RETRY_DELAY_MS = 1500;
+const MAX_RETRIES = 8;
+const RETRY_DELAY_MS = 2000;
+const INSTALL_WAIT_MS = 2000; // poll interval while waiting for node_modules
+const INSTALL_MAX_WAIT_MS = 60000; // cap for waiting out a slow `npm install`
 const VITE_BIN = path.join(ROOT, "node_modules", "vite", "bin", "vite.js");
-const PID_FILE = path.join(ROOT, "node_modules", ".vite-dev.pid");
+const PID_FILE = path.join(ROOT, "node_modules", `.vite-dev-${DEV_PORT}.pid`);
 
 const log = (...args) => console.log("[dev]", ...args);
 
@@ -156,6 +158,26 @@ async function startOnce(attempt) {
   return exitCode;
 }
 
+async function waitForInstall() {
+  if (existsSync(VITE_BIN)) return true;
+  log(
+    `vite binary not found yet (${path.relative(ROOT, VITE_BIN)}) — ` +
+      "npm install may still be running; waiting…",
+  );
+  const waitedUntil = Date.now() + INSTALL_MAX_WAIT_MS;
+  while (Date.now() < waitedUntil) {
+    await new Promise((r) => setTimeout(r, INSTALL_WAIT_MS));
+    if (existsSync(VITE_BIN)) {
+      log("node_modules ready; proceeding");
+      return true;
+    }
+  }
+  console.error(
+    `[dev] vite binary still missing after ${INSTALL_MAX_WAIT_MS / 1000}s — giving up`,
+  );
+  return false;
+}
+
 async function main() {
   // A previous run's PID file can outlive a dead process across sandbox
   // restarts; if the process is gone, just clear it.
@@ -172,6 +194,13 @@ async function main() {
     } catch {
       rmSync(PID_FILE, { force: true });
     }
+  }
+
+  // The platform runs install and dev back-to-back; if the dev server boots
+  // before install finished, wait for node_modules instead of failing fast.
+  if (!(await waitForInstall())) {
+    process.exitCode = 1;
+    return;
   }
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
