@@ -21,6 +21,7 @@
  */
 import { spawn, execSync } from "node:child_process";
 import { createConnection } from "node:net";
+import { createServer } from "node:http";
 import { readFileSync, existsSync, writeFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -116,7 +117,88 @@ function removePid() {
   }
 }
 
+/**
+ * Loading-page placeholder server.
+ *
+ * While vite is starting (install still running, or a crash-retry backoff),
+ * we serve a lightweight "Starting development server…" page on the dev port.
+ * The preview platform health-checks the port; keeping it answering with
+ * HTTP 200 avoids the scary "Dev server failed" message during the brief
+ * window when vite is not yet (or no longer) listening. The page polls the
+ * root until the real app appears, then reloads.
+ */
+const PLACEHOLDER_HTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Loading…</title>
+<style>
+  body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;
+       background:#0b1220;color:#cbd5e1;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .box{display:flex;align-items:center;gap:14px;font-size:15px}
+  .spin{width:26px;height:26px;border-radius:50%;border:3px solid #1e293b;border-top-color:#6366f1;
+        animation:spin 1s linear infinite;flex:none}
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body data-placeholder="1">
+  <div class="box">
+    <div class="spin" aria-hidden="true"></div>
+    <div>Starting development server…</div>
+  </div>
+  <script>
+    (function poll() {
+      fetch('/', { cache: 'no-store' })
+        .then(function (r) { return r.text(); })
+        .then(function (t) {
+          if (t.indexOf('id="root"') !== -1) { location.reload(); return; }
+          setTimeout(poll, 700);
+        })
+        .catch(function () { setTimeout(poll, 700); });
+    })();
+  </script>
+</body>
+</html>
+`;
+
+let placeholder = null;
+
+/** Bind the loading page to the dev port. Returns true if it bound. */
+function startPlaceholder() {
+  return new Promise((resolve) => {
+    if (placeholder) return resolve(true);
+    const srv = createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(PLACEHOLDER_HTML);
+    });
+    srv.on("error", () => {
+      placeholder = null;
+      resolve(false); // port busy (e.g. vite already up) — nothing to do
+    });
+    srv.listen(DEV_PORT, "0.0.0.0", () => {
+      placeholder = srv;
+      log(`serving loading page on port ${DEV_PORT} while vite starts`);
+      resolve(true);
+    });
+  });
+}
+
+function stopPlaceholder() {
+  if (placeholder) {
+    try {
+      placeholder.close();
+    } catch {
+      /* ignore */
+    }
+    placeholder = null;
+  }
+}
+
 async function startOnce(attempt) {
+  // Free the port for vite: our own loading page must go first, then any
+  // other stale process.
+  stopPlaceholder();
   await clearStaleProcesses();
   writePid();
 
@@ -198,6 +280,9 @@ async function main() {
 
   // The platform runs install and dev back-to-back; if the dev server boots
   // before install finished, wait for node_modules instead of failing fast.
+  // While we wait (and between retries) the loading page keeps the port alive
+  // so the preview never shows a dead server.
+  await startPlaceholder();
   if (!(await waitForInstall())) {
     process.exitCode = 1;
     return;
@@ -212,6 +297,7 @@ async function main() {
     log(`vite exited with code ${code}`);
     if (attempt < MAX_RETRIES) {
       log(`retrying in ${RETRY_DELAY_MS}ms...`);
+      await startPlaceholder(); // keep the port answering during backoff
       await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
     } else {
       console.error(`[dev] vite failed after ${MAX_RETRIES} attempts (last exit code ${code})`);
